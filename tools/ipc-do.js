@@ -24,12 +24,8 @@ const commandMap = {
 }
 
 function cleanExit() {
-  // Close the socket client first
   client.end(() => {
-    // Then close the write stream
-    sclient.end(() => {
-      process.exit(0);
-    });
+    process.exit(0);
   });
 }
 

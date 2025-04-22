@@ -39,7 +39,7 @@ if [[ $1 == 'd' ]]; then
   exit
 fi
 
-declare -A mapping=( [0]='volup' [o]='quit' [9]='voldn' [q]='quit' [up]='forward 60' [down]='back 60' [left]='back' [right]='forward' [p]='p' [return]='ENTER' [space]='pauseplay' [comma]='prev' [period]='next' [s]='s' [r]='r' )
+declare -A mapping=( [0]='volup' [l]='quit' [9]='voldn' [q]='quit' [up]='forward 60' [down]='back 60' [left]='back' [right]='forward' [p]='p' [return]='ENTER' [space]='pauseplay' [comma]='prev' [period]='next' [s]='s' [r]='r' )
 
 [[ -z "$1" ]] && printf "%s\n" "${!mapping[@]}" "${mapping[@]}" | pr -2t && exit 
 [[ ${mapping[$1]+_} ]] && control=${mapping[$1]} || control=$1

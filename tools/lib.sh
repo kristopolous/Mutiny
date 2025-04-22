@@ -49,7 +49,6 @@ FORMAT="-f mp3-128"
 # These are finer options for scraping that tries to not be too greedy
 SLEEP_MIN=1
 SLEEP_MAX=3
-SLEEP_OPTS="--max-sleep-interval $SLEEP_MAX --min-sleep-interval $SLEEP_MIN"
 
 # We can optimize things if we assume there's no such things as a playlist that
 # points to URLS that expire
@@ -97,6 +96,7 @@ _doc['quit']="[ internal ]"
 quit() { echo "$1"; exit; }
 
 [[ -e $DIR/prefs.sh ]] && . $DIR/prefs.sh || debug "Can't find $DIR/prefs.sh"
+SLEEP_OPTS="--max-sleep-interval $SLEEP_MAX --min-sleep-interval $SLEEP_MIN"
 
 _doc['check_for_stop']="[ internal ] () Sees if the stop flag has been triggered"
 check_for_stop() { 
@@ -724,9 +724,9 @@ _repl() {
         load    - Load a playlist
 
       Converting:
-        remote  - Set remote server [$REMOTE]
-        base    - Set remote base   [$REMOTEBASE]
-        fmt     - Set the format    [$FMT]
+        remote  - Remote server         [$REMOTE]
+        base    - Remote base           [$REMOTEBASE]
+        fmt     - Format (opus|m5a|mp3) [$FMT]
 
       Filtering:
         filter  - Set filter        [$filter]

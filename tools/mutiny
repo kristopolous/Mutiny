@@ -216,6 +216,7 @@ while [[ ${#all[@]} -gt $ix ]]; do
 
             # Here's where the conversion magic happens if needed.
             if [[ $FMT != "mp3" && -z "$NONET" ]]; then
+              status "$i"
               timeit "convert"
               ssh $REMOTE "source .{zshrc,profile};mutlib to$FMT $REMOTEBASE/$i"
               sed "s/mp3/$FMT/" "$i"/$PLAYLIST > "$i"/playlist-$FMT.m3u
