@@ -153,6 +153,9 @@ while [[ $# -gt 0 ]]; do
     place="$starting_point/$release"
 
     if [[ -e "$place/no" ]]; then 
+      if [[ ! -e "$place/"$PAGE ]]; then
+        get_page "$place"
+      fi
       #echo   "     $release"
       continue
       # Pay attention to the -s, essentially we 

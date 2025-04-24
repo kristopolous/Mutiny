@@ -354,10 +354,10 @@ album_purge() {
     _mkdir $UNDODIR/"$path"
 
     mv "$path"/* $UNDODIR/"$path" 2> /dev/null
-    cp $UNDODIR/"$path"/page.html "$path"
+    cp $UNDODIR/"$path"/$PAGE "$path"
   else
     debug "Bypassing undo"
-    find "$path"/ ! -name 'page.html' -type f -delete
+    find "$path"/ ! -name $PAGE -type f -delete
   fi
 
   if [[ ! -e "$path"/no ]]; then
