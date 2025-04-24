@@ -349,13 +349,15 @@ album_purge() {
   local info="$1"
   local path="$2"
   
+  # we want to preserve page.html for training
   if [[ -z "$NOUNDO" ]]; then
     _mkdir $UNDODIR/"$path"
 
     mv "$path"/* $UNDODIR/"$path" 2> /dev/null
+    cp $UNDODIR/"$path"/page.html "$path"
   else
     debug "Bypassing undo"
-    rm "$path"/*
+    find "$path"/ ! -name 'page.html' -type f -delete
   fi
 
   if [[ ! -e "$path"/no ]]; then

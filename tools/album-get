@@ -104,7 +104,6 @@ while [[ $# -gt 0 ]]; do
   # And it dumps it in the current directory
   #
   elif [[ "$arg" =~ '/' && -d "$base_path/$arg" ]]; then 
-    echo hi
     base="$arg"
     list=$(< "$arg/domain" )
   else
