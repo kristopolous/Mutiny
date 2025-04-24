@@ -418,7 +418,7 @@ get_page() {
     fi
   else 
     url="$(resolve "$1")"
-    echo "     $1 => $url"
+    echo "     ${1#$start_dir/} => $url"
     curl -Ls $(resolve "$1") > "$1/$PAGE"
   fi
 }
