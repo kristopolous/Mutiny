@@ -3,7 +3,7 @@
 # You can override these with the command mutlib prefs
 #
 tmp=/tmp/mutiny
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # What format to look for 
 FMT=${FMT:=mp3}
 

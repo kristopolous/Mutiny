@@ -2,6 +2,7 @@ local os = require 'os'
 local io = require 'io'
 local pfx = '/tmp/mutiny/eb383810f22a-'
 local posix = require 'posix'
+local tools = os.getenv('DIR') .. '/'
 
 mp.enable_messages('error')
 
@@ -48,8 +49,8 @@ function print_on_start(e,f)
   pos = mp.get_property_native("playlist-pos-1", 1)
   ttl = mp.get_property_native("playlist-count")
   toprint = string.gsub(pl[pos]['filename'], "(.*/)(.*)-%d*.mp3", "%2")
-  os.execute('mutlib announce "' .. toprint .. '"')
-  os.execute('mutlib ardy_stat T ' .. pos .. ' ' .. ttl)
+  os.execute(tools .. 'mutlib announce "' .. toprint .. '"')
+  os.execute(tools .. 'mutlib ardy_stat T ' .. pos .. ' ' .. ttl)
 end
 
 function openpage_handler()
