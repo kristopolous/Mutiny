@@ -3,7 +3,7 @@
 # You can override these with the command mutlib prefs
 #
 tmp=/tmp/mutiny
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # What format to look for 
 FMT=${FMT:=mp3}
 
@@ -374,12 +374,13 @@ unpurge() {
 
 _doc['resolve']="( path ) Figures out the url resolution for given path"
 resolve() {
+  local path=${1#$start_dir/}
   if [[ -e "$1/domain" ]]; then
     echo $(cat "$1/domain" )
   else
-    label=$( dirname "$1" )
+    label=$( dirname "$path" )
     [[ -e "$label/domain" ]] && domain=$(cat $label/domain ) || domain=${label/.\//}.bandcamp.com
-    release=$( basename "$1" )
+    release=$( basename "$path" )
     echo "https://$domain/album/$release"
   fi
 }
@@ -416,7 +417,8 @@ get_page() {
       mv "$tmp/$PAGE" "$1/$PAGE"
     fi
   else 
-    echo $1
+    url="$(resolve "$1")"
+    echo "     ${1#$start_dir/} => $url"
     curl -Ls $(resolve "$1") > "$1/$PAGE"
   fi
 }
