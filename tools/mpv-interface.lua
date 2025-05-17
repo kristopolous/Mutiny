@@ -115,7 +115,7 @@ mp.register_event("shutdown", record_volume)
 mp.register_script_message('updatearduino', print_on_start)
 mp.add_key_binding('f', 'share', share_handler)
 mp.add_key_binding('o', 'openpage', openpage_handler)
-mp.add_key_binding('?', 'getinfo', getinfo_handler)
+mp.add_key_binding('h', 'getinfo', getinfo_handler)
 -- We call this a normal quit but we want to differentiated it 
 -- from the quit on track end
 mp.add_key_binding('q', 'quit', function() 
