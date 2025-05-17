@@ -1,4 +1,1 @@
-python3-discogs-client
-discogs_client
-requests_cache
-redis
+scrapy
