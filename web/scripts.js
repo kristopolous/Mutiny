@@ -1,10 +1,9 @@
-var 
-  _track = {},
+var _track = {},
   _my = {},
   _qstr,
   _next = {},
   _db = {},
-  _tab = 'track',
+  _tab = "track",
   _if,
   _play,
   // 0: opus
@@ -44,79 +43,92 @@ var
         });
 
 function parsehash() {
-  let hash = window.location.hash.slice(1).split('/');
+  let hash = window.location.hash.slice(1).split("/");
   Object.assign(_my, {
-    label: hash[0] || '',
-    release: hash[1] || ''
+    label: hash[0] || "",
+    release: hash[1] || "",
   });
-  _qstr = hash[3] || '';
+  _qstr = hash[3] || "";
   _format = hash[4] || 2;
   _filter = hash[5] || 1;
   document.body.className = "q" + _format;
-  document.querySelectorAll('input[name="format"]')[_format].checked = true
-  document.querySelectorAll('input[name="filter"]')[_filter].checked = true
+  document.querySelectorAll('input[name="format"]')[_format].checked = true;
+  document.querySelectorAll('input[name="filter"]')[_filter].checked = true;
   return hash[2];
 }
 
 function play_url(play) {
-  let src = path_to_url(play.path), ifr,
-    fake = (_track.path === play.path),
-    rel = _my.trackList, ttl = rel.length;
-  
-  if(!fake) {
-    if(_format > 1) {
+  let src = path_to_url(play.path),
+    ifr,
+    fake = _track.path === play.path,
+    rel = _my.trackList,
+    ttl = rel.length;
+
+  if (!fake) {
+    if (_format > 1) {
       ifr = _if ^= 1;
-      _DOM[`if${ifr}`].className = 'in';
+      _DOM[`if${ifr}`].className = "in";
 
       // this type of iframe reassignmemt prevents the location history
       // from being populated so the back button still works.
       _DOM[`if${ifr}`].contentWindow.location.replace(src);
 
-      // we delay the transition if it's the same album. 
+      // we delay the transition if it's the same album.
       // Otherwise there's this temporary fading effect
-      if(_track.release !== play.release) {
-        _DOM[`if${+!ifr}`].className = 'out';
+      if (_track.release !== play.release) {
+        _DOM[`if${+!ifr}`].className = "out";
       }
 
       setTimeout(() => {
-        if(_track.path === play.path) {
-          _DOM[`if${+!ifr}`].className = 'out';
+        if (_track.path === play.path) {
+          _DOM[`if${+!ifr}`].className = "out";
           _DOM[`if${+!ifr}`].contentWindow.location.replace(src);
         }
         _lock.hash = 0;
       }, 1000);
       _lock.hash = 1;
     }
-    window.location.hash = [play.label, play.release, play.id, _qstr, _format, _filter].join('/');
+    window.location.hash = [
+      play.label,
+      play.release,
+      play.id,
+      _qstr,
+      _format,
+      _filter,
+    ].join("/");
+    _play = play;
   }
-  ['release','label'].forEach(a => _DOM[a].innerHTML = _my[a].replace(/-/g, ' '))
+  ["release", "label"].forEach(
+    (a) => (_DOM[a].innerHTML = _my[a].replace(/-/g, " ")),
+  );
   _DOM.track.innerHTML = [
-    '<div style=width:',
-    (100 * (play.id+1) / _my.trackList.length ),
-    '%></div><div style=width:',
-    (100 * (_my.number+1) / _my.count ),
-    '%></div>'
-    ].join('');
+    "<div style=width:",
+    (100 * (play.id + 1)) / _my.trackList.length,
+    "%></div><div style=width:",
+    (100 * (_my.number + 1)) / _my.count,
+    "%></div>",
+  ].join("");
   //_DOM.track.innerHTML = `${play.id + 1}:${_my.trackList.length}<br/>${_my.number + 1}:${_my.count}`;
 
   _my.track = play.track;
 
-  _next['+track'] = rel[(      play.id + 1) % ttl];
-  _next['-track'] = rel[(ttl + play.id - 1) % ttl];
+  _next["+track"] = rel[(play.id + 1) % ttl];
+  _next["-track"] = rel[(ttl + play.id - 1) % ttl];
   _track = play;
 
   // This warms up the backend cache for the next tracks we can navigate to
   Object.values(_next).forEach(lookup);
 
-  _DOM.controls.className = '';
+  _DOM.controls.className = "";
   // this is the url to play.
-  return fake? 
-    new Promise(r => r()): 
-    lookup(play).then(data => {
+  return fake
+    ? new Promise((r) => r())
+    : lookup(play).then((data) => {
       // The file names can be really weird so we escape just that part of the path
       // Safari has issues with their PCRE so we are doing this dumber
-      let parts = data.split('/'), fname = parts.pop();
-      _DOM.player.src = [...parts, encodeURIComponent(fname)].join('/');
+      let parts = data.split("/"),
+        fname = parts.pop();
+      _DOM.player.src = [...parts, encodeURIComponent(fname)].join("/");
 
       //_DOM.player.src = data.replace(/(?:\/)([^\/]*)$/, a => encodeURIComponent(a))
 
@@ -125,60 +137,69 @@ function play_url(play) {
       _DOM.player.load();
       document.title = play.track;
 
-      let [artist, title] = play.track.split(' - ');
+      let [artist, title] = play.track.split(" - ");
       title = title ?? artist;
       //_DOM.player.play();
 
       // There's a weird chrome bug here with doing another new operator.
       // I think these remediations are just voodoo ... I don't know what
       // the real bug is.
-      if(navigator.mediaSession) {
-        Object.assign( navigator.mediaSession.metadata, {
-            title, artist,
-            album: play.release
+      if (navigator.mediaSession) {
+        Object.assign(
+          navigator.mediaSession.metadata,
+          {
+            title,
+            artist,
+            album: play.release,
           },
-          _format < 2 ? {} : {
-            artwork: [96,128,192,256,384,512].map(r => { 
-              return {
-                src: play.path.replace(/\/[^\/]*$/,'') + `/album-art.jpg`, 
-                sizes: `${r}x${r}`,
-                type: 'image/jpeg'
-              }
-            })
-        });
+          _format < 2
+            ? {}
+            : {
+              artwork: [96, 128, 192, 256, 384, 512].map((r) => {
+                return {
+                  src:
+                    play.path.replace(/\/[^\/]*$/, "") + `/album-art.jpg`,
+                  sizes: `${r}x${r}`,
+                  type: "image/jpeg",
+                };
+              }),
+            },
+        );
       }
-   });
+    });
 }
 
 function d(skip, orig) {
-  if(!_DOM.controls.className) {
+  if (!_DOM.controls.className) {
     let next = _next[skip];
 
-    if (next) { 
-      if( !_lock.loop && (
-            (skip == '+track'   && next.id === 0)
-         || (skip == '-track'   && next.id >= _track.id)
-         || (skip == '+release' && next.number == 0) 
-         || (skip == '-release' && next.number >= _my.number)
-        ) 
+    if (next) {
+      if (
+        !_lock.loop &&
+        ((skip == "+track" && next.id === 0) ||
+          (skip == "-track" && next.id >= _track.id) ||
+          (skip == "+release" && next.number == 0) ||
+          (skip == "-release" && next.number >= _my.number))
       ) {
-        return d(skip[0] + (skip[1] === 't' ? 'release' : 'label'), orig || skip);
+        return d(
+          skip[0] + (skip[1] === "t" ? "release" : "label"),
+          orig || skip,
+        );
       }
 
-      if('id' in next) {
-        if(skip[1] === 't') {
+      if ("id" in next) {
+        if (skip[1] === "t") {
           return play_url(next);
-        } else if(!orig || skip === orig) {
+        } else if (!orig || skip === orig) {
           play_url(next);
         }
       }
-    } 
-
-    if(_format > 1) {
-      _DOM.controls.className = 'disabled';
     }
-    return remote([ `action=${skip}`, `orig=${orig || skip}` ])
-      .then(data => {
+
+    if (_format > 1) {
+      _DOM.controls.className = "disabled";
+    }
+    return remote([`action=${skip}`, `orig=${orig || skip}`]).then((data) => {
       if (_my) {
         _my = data.release;
         delete data.release;
@@ -191,7 +212,7 @@ function d(skip, orig) {
 
 function setLevel(what) {
   _format = what;
-  _DOM.search.value = '';
+  _DOM.search.value = "";
   _db = {};
   document.body.className = "q" + _format;
 }
@@ -260,9 +281,9 @@ window.onload = () => {
     // 3 taps = label
     //
     [
-      ['next','+'],
-      ['previous', '-']
-    ].forEach(([word, sign]) => 
+      ["next", "+"],
+      ["previous", "-"],
+    ].forEach(([word, sign]) =>
       navigator.mediaSession.setActionHandler(`${word}track`, () => {
         if (pauseFlag) {
           voiceSearch();
@@ -270,27 +291,30 @@ window.onload = () => {
           return true;
         }
         _lock[sign] = (_lock[sign] || 0) + 1;
-        if(!_lock[word]) {
+        if (!_lock[word]) {
           _lock[word] = setTimeout(() => {
-            d( sign + ' track release label'.split(' ')[Math.min(_lock[sign], 3)] );
+            d(
+              sign +
+              " track release label".split(" ")[Math.min(_lock[sign], 3)],
+            );
             _lock[sign] = _lock[word] = 0;
           }, 400);
         }
-      })
+      }),
     );
   }
   _DOM.track.onclick = function() {
     _lock.loop ^= 1;
-    _DOM.track.className = (_lock.loop ? 'loop' : '');
-  }
+    _DOM.track.className = _lock.loop ? "loop" : "";
+  };
 
   _DOM.search.value = _qstr;
 
-  _DOM.search.onkeydown = e => { 
+  _DOM.search.onkeydown = (e) => {
     window.clearTimeout(_lock.search);
-    _lock.search = window.setTimeout(() =>  {
+    _lock.search = window.setTimeout(() => {
       let newstr = encodeURIComponent(_DOM.search.value);
-      if(newstr !== _qstr) {
+      if (newstr !== _qstr) {
         _qstr = newstr;
         _DOM.navcontrols.onclick();
         _lock.hash = 1;
@@ -308,101 +332,109 @@ window.onload = () => {
         _lock.hash = 0;
       }
     }, 250);
-  }
+  };
 
-  _DOM.navcontrols.onclick = e => {
+  _DOM.navcontrols.onclick = (e) => {
     if (e) {
       let what = e.target;
       _tab = what.innerHTML;
-      
-      what.parentNode.childNodes.forEach(m => m.className = '');
-      what.className = 'selected';
+
+      what.parentNode.childNodes.forEach((m) => (m.className = ""));
+      what.className = "selected";
     }
-    if(_tab == "prefs") {
-      _DOM.list.innerHTML = '';
-      _DOM.list.appendChild( _DOM.prefs );
+    if (_tab == "prefs") {
+      _DOM.list.innerHTML = "";
+      _DOM.list.appendChild(_DOM.prefs);
       return;
     }
 
-    remote([ `action=${_tab}` ])
-      .then(data => {
-        try {
-          _DOM.list.removeChild(_DOM.list.firstElementChild);
-        } catch(e) { } 
-        _DOM.list.innerHTML = '';
-        _DOM.list.append(...data.sort().map((obj,ix) => {
-            console.log(obj);
-            let l = Object.assign(document.createElement('li'), {innerHTML: obj.track || obj.release || obj, obj, ix});
+    remote([`action=${_tab}`]).then((data) => {
+      try {
+        _DOM.list.removeChild(_DOM.list.firstElementChild);
+      } catch (e) { }
+      _DOM.list.innerHTML = "";
+      _DOM.list.append(
+        ...data.sort().map((obj, ix) => {
+          console.log(obj);
+          let l = Object.assign(document.createElement("li"), {
+            innerHTML: obj.track || obj.release || obj,
+            obj,
+            ix,
+          });
 
-            if(l.innerHTML === _my[_tab]){
-              l.className = 'selected';
-            }
-            return l;
-          })
+          if (l.innerHTML === _my[_tab]) {
+            l.className = "selected";
+          }
+          return l;
+        }),
+      );
+      // scroll to the element but only if the scrollbar is at the top.
+      if (_DOM.list.scrollTop === 0 && _DOM.list.querySelector(".selected")) {
+        _DOM.list.scrollTo(
+          0,
+          _DOM.list.querySelector(".selected").offsetTop - 150,
         );
-        // scroll to the element but only if the scrollbar is at the top.
-        if(_DOM.list.scrollTop === 0 && _DOM.list.querySelector('.selected')) {
-          _DOM.list.scrollTo(0, _DOM.list.querySelector('.selected').offsetTop - 150);
-        }
-      });
-  }
-
-  _DOM.list.onclick = e => {
-    let ix = 0;
-    if(e.target.tagName == 'INPUT'){
-      if(e.target.name == "format") {
-        setLevel( +e.target.value );
       }
-      if(e.target.name == "filter") {
+    });
+  };
+
+  _DOM.list.onclick = (e) => {
+    let ix = 0;
+    if (e.target.tagName == "INPUT") {
+      if (e.target.name == "format") {
+        setLevel(+e.target.value);
+      }
+      if (e.target.name == "filter") {
         _filter = +e.target.value;
       }
-    } else if(e.target.tagName == 'LI'){
-      if(_tab === 'track' || _tab === 'release') {
+    } else if (e.target.tagName == "LI") {
+      if (_tab === "track" || _tab === "release") {
         ix = e.target.ix;
         _my = e.target.obj;
       } else {
         _my[_tab] = e.target.innerHTML;
-        if(_tab === 'label'){
-          _my.release = '';
+        if (_tab === "label") {
+          _my.release = "";
         }
       }
       d(ix).then(_DOM.navcontrols.onclick);
     }
-  }
+  };
 
-  document.body.onclick = e => {
+  document.body.onclick = (e) => {
     e = e.target;
-    while(e != document.body){
+    while (e != document.body) {
       if (e === _DOM.search) {
-        _DOM.nav.style.display = 'block';
+        _DOM.nav.style.display = "block";
         _DOM.navcontrols.onclick();
       }
-      if(e === _DOM.top) {
+      if (e === _DOM.top) {
         return;
       }
       e = e.parentNode;
     }
-    _DOM.nav.style.display = 'none';
+    _DOM.nav.style.display = "none";
   };
 
-  _DOM.player.addEventListener('durationchange', (e) => {
+  _DOM.player.addEventListener("durationchange", (e) => {
     e.target.currentTime = (_DOM.start.value / 100) * e.target.duration;
     _DOM.player.play();
   });
 
   _DOM.player.onended = () => {
     d("+track");
-    if(_format > 1) {
-      Notification.requestPermission().then(p => {
+    if (_format > 1) {
+      Notification.requestPermission().then((p) => {
         if (p === "granted") {
-          let s = decodeURIComponent(_DOM.player.src).split('/').reverse();
-          new Notification(s[1].replace(/-/g, ' ').toUpperCase(), {
-            body: s[0].replace(/-(\d*).mp3$/,'')});
+          let s = decodeURIComponent(_DOM.player.src).split("/").reverse();
+          new Notification(s[1].replace(/-/g, " ").toUpperCase(), {
+            body: s[0].replace(/-(\d*).mp3$/, ""),
+          });
         }
       });
     }
-  }
+  };
 
   d(parsehash() ?? 0).then(_DOM.navcontrols.onclick);
-  window.addEventListener('hashchange', () => !_lock.hash && d(parsehash()));
-}
+  window.addEventListener("hashchange", () => !_lock.hash && d(parsehash()));
+};
