@@ -6,6 +6,7 @@ var
   _db = {},
   _tab = 'track',
   _if,
+  _play,
   // 0: opus
   // 1: heaac
   // 2: mp3
@@ -15,21 +16,32 @@ var
   _filter = 1,
   _DOM = {},
   _lock = {},
-  path_to_url = str => 'https://bandcamp.com/EmbeddedPlayer/size=large/bgcol=333333/linkcol=ffffff/transparent=true/track=' + str.match(/(\d*).mp3$/)[1],
-  remote = (append = []) => fetch("get_playlist.php?" + [ `filter=${_filter}`, 
-      `level=${_format}`, 
-      `q=${_qstr}`, 
-      `release=${_my.release}`, 
-      `label=${_my.label}`, 
-      ...append ].join('&')).then(response => response.json()),
-  lookup = play => _db[play.path] ?
-    new Promise(r => r(_db[play.path])) :
-    fetch(`url2mp3.php?q=${_format}&path=${encodeURIComponent(play.path)}&u=${path_to_url(play.path)}`)
-      .then(response => response.text())
-      .then(data => {
-        _db[play.path] = data;
-        return data;
-      });
+  path_to_url = (str) =>
+    "https://bandcamp.com/EmbeddedPlayer/size=large/bgcol=333333/linkcol=ffffff/transparent=true/track=" +
+    str.match(/(\d*).mp3$/)[1],
+  remote = (append = []) =>
+    fetch(
+      "get_playlist.php?" +
+      [
+        `filter=${_filter}`,
+        `level=${_format}`,
+        `q=${_qstr}`,
+        `release=${_my.release}`,
+        `label=${_my.label}`,
+        ...append,
+      ].join("&"),
+    ).then((response) => response.json()),
+  lookup = (play) =>
+    _db[play.path]
+      ? new Promise((r) => r(_db[play.path]))
+      : fetch(
+        `url2mp3.php?q=${_format}&path=${encodeURIComponent(play.path)}&u=${path_to_url(play.path)}`,
+      )
+        .then((response) => response.text())
+        .then((data) => {
+          _db[play.path] = data;
+          return data;
+        });
 
 function parsehash() {
   let hash = window.location.hash.slice(1).split('/');
@@ -167,11 +179,13 @@ function d(skip, orig) {
     }
     return remote([ `action=${skip}`, `orig=${orig || skip}` ])
       .then(data => {
+      if (_my) {
         _my = data.release;
         delete data.release;
         _next = data;
         return play_url(_my.trackList[_my.track_ix]);
-      });
+      }
+    });
   }
 }
 
@@ -182,15 +196,64 @@ function setLevel(what) {
   document.body.className = "q" + _format;
 }
 
+function voiceSearch() {
+  const recognition = new (window.SpeechRecognition ||
+    window.webkitSpeechRecognition)();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = function(event) {
+    const transcript = event.results[event.resultIndex][0].transcript;
+    _qstr = transcript;
+    _DOM.navcontrols.onclick();
+    Object.assign(navigator.mediaSession.metadata, {
+      title: _qstr,
+      artist: "Voice Search",
+    });
+  };
+
+  recognition.onerror = function(event) {
+    console.error("Speech recognition error: ", event.error);
+  };
+  Object.assign(navigator.mediaSession.metadata, {
+    title: "Voice Search",
+  });
+
+  recognition.start();
+}
+
 window.onload = () => {
   parsehash();
 
-  'prefs start player if0 if1 label release top list nav navcontrols search track controls'.split(' ').forEach(
-    what => _DOM[what] = document.getElementById(what)
-  );
+  "prefs start player if0 if1 label release top list nav navcontrols search track controls"
+    .split(" ")
+    .forEach((what) => (_DOM[what] = document.getElementById(what)));
 
   if (self.MediaMetadata) {
+    let pauseFlag = false,
+      toggleTime;
     navigator.mediaSession.metadata = new MediaMetadata();
+
+    navigator.mediaSession.setActionHandler("pause", () => {
+      _DOM.player.pause();
+      Object.assign(navigator.mediaSession.metadata, {
+        title: "pause",
+      });
+      pauseFlag = true;
+    });
+    navigator.mediaSession.setActionHandler("play", async () => {
+      let delta = new Date() - toggleTime;
+      if (delta < 500) {
+        return;
+      }
+      await _DOM.player.play();
+
+      Object.assign(navigator.mediaSession.metadata, {
+        title: "play",
+        artist: delta,
+      });
+      pauseFlag = false;
+    });
     //
     // 1 tap  = track
     // 2 taps = release
@@ -201,6 +264,11 @@ window.onload = () => {
       ['previous', '-']
     ].forEach(([word, sign]) => 
       navigator.mediaSession.setActionHandler(`${word}track`, () => {
+        if (pauseFlag) {
+          voiceSearch();
+          toggleTime = new Date();
+          return true;
+        }
         _lock[sign] = (_lock[sign] || 0) + 1;
         if(!_lock[word]) {
           _lock[word] = setTimeout(() => {
@@ -225,6 +293,19 @@ window.onload = () => {
       if(newstr !== _qstr) {
         _qstr = newstr;
         _DOM.navcontrols.onclick();
+        _lock.hash = 1;
+
+        if (_play) {
+          window.location.hash = [
+            _play.label,
+            _play.release,
+            _play.id,
+            _qstr,
+            _format,
+            _filter,
+          ].join("/");
+        }
+        _lock.hash = 0;
       }
     }, 250);
   }
