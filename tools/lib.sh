@@ -187,6 +187,7 @@ breaker() {
   $player --ao=$ao $player_opts -really-quiet $tmp/breaker.mp3
 }
 
+_doc['ardy_stat']="( ([123T]|*), args ) Writes playlist stats to the arduino socket"
 ardy_stat() {
   {
     case $1 in
@@ -577,7 +578,7 @@ _info () {
   echo
 }
 
-_doc['_ytdl']="(url, path) The wrapper function around the music-getting-tool (such as yt-dlp)"
+_doc['_ytdl']="( url, path ) The wrapper function around the music-getting-tool (such as yt-dlp)"
 _ytdl () {
   if [[ -z "$NONET" ]]; then
     local url="$1"
@@ -945,20 +946,12 @@ get_links() {
 
 _doc['get_videos']="() Gets all the videos"
 get_videos() {
-  label=$1
+  label="$1"
   video_domain="https://bandcamp.23video.com"
   _mkdir .video
 
-  #scrape_domain=${1}.bandcamp.com
-  #if [[ -e $1/domain ]]; then
-  #  scrape_domain=$(< $1/domain)
-  #fi
-
-  for i in $1/*; do
-    #release=$(basename $i)
-    #index=${scrape_domain}/album/${release}
-    #echo https://$index
-    [[ ! -r  $i/page.html ]] && continue
+  for i in "$1"/*; do
+    [[ ! -r  "$i"/page.html ]] && continue
     cat $i/page.html | grep data-href | grep -Pio '(?<=")(.*mp4|.*avi|.*mkv|.*flv)(?=")' | while read path
     do
       out=$(basename $path)
