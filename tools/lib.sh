@@ -298,7 +298,7 @@ recent() {
   local first_date=${first##* }
   local days=$(( ($(date +%s) - $(date --date=$first_date +%s)) / 86400 ))
 
-  grep "20[2-4][0-9]" .listen_done | awk ' { print $NF } ' | sort | uniq -c
+  grep "20[2-4][0-9]" .listen_done | grep -v __skipping | awk ' { print $NF } ' | sort | uniq -c
   local ttl=$(wc -l < .listen_all).0
   local done=$(wc -l < .listen_done).0
   wc -l .listen*
@@ -947,18 +947,23 @@ _doc['get_videos']="() Gets all the videos"
 get_videos() {
   label=$1
   video_domain="https://bandcamp.23video.com"
-  scrape_domain=${1}.bandcamp.com
-  if [[ -e $1/domain ]]; then
-    scrape_domain=$(< $1/domain)
-  fi
+  _mkdir .video
+
+  #scrape_domain=${1}.bandcamp.com
+  #if [[ -e $1/domain ]]; then
+  #  scrape_domain=$(< $1/domain)
+  #fi
 
   for i in $1/*; do
-    release=$(basename $i)
-    index=${scrape_domain}/album/${release}
-    echo https://$index
-    curl -s https://$index | grep data-href | grep -Pio '(?<=")(.*mp4|.*avi|.*mkv|.*flv)(?=")' | while read path
+    #release=$(basename $i)
+    #index=${scrape_domain}/album/${release}
+    #echo https://$index
+    [[ ! -r  $i/page.html ]] && continue
+    cat $i/page.html | grep data-href | grep -Pio '(?<=")(.*mp4|.*avi|.*mkv|.*flv)(?=")' | while read path
     do
-      echo :: $video_domain$path
+      out=$(basename $path)
+      [[ -r .video/$out ]] || curl -s $video_domain$path -o .video/$out
+      echo $out
     done
   done
 }
