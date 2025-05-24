@@ -89,7 +89,7 @@ debug() { [[ -n "$DEBUG" ]] && echo -e "\t$1"; }
 _doc['hr']="() generates a horizontal rule"
 hr() { echo; printf '\xe2\x80\x95%.0s' $( seq 1 $(tput cols) ); echo; }
 
-_doc['purge']="( what ) A manual CLI way to purge an album"
+_doc['purge']="( path ) A manual CLI way to purge an album"
 purge() { album_purge "CLI" "$1"; }
 
 _doc['quit']="[ internal ]"
@@ -106,7 +106,7 @@ check_for_stop() {
   fi
 }
 
-_doc['album_get']="( hostname1 ... hostnamen ) this is a pass-through to the album-get script"
+_doc['album_get']="( hostname1 ... hostnameN ) this is a pass-through to the album-get script"
 album_get() {
   $DIR/album-get $*
 }
@@ -386,6 +386,7 @@ resolve() {
   fi
 }
 
+_doc['pl_check']="[ internal ] "
 pl_check() {
   pl="$1/$PLAYLIST"
 
@@ -395,6 +396,7 @@ pl_check() {
     && rm "$pl"
 }
 
+_doc['pl_fallback']="[ internal ] "
 pl_fallback() {
   ( 
     shopt -u nullglob
@@ -946,17 +948,20 @@ get_links() {
 
 _doc['get_videos']="() Gets all the videos"
 get_videos() {
-  label="$1"
   video_domain="https://bandcamp.23video.com"
   _mkdir .video
-
-  for i in "$1"/*; do
+  for i in */*; do
     [[ ! -r  "$i"/page.html ]] && continue
-    cat $i/page.html | grep data-href | grep -Pio '(?<=")(.*mp4|.*avi|.*mkv|.*flv)(?=")' | while read path
+    grep data-href "$i/page.html" | grep -Pio '(?<=")(.*mp4|.*avi|.*mkv|.*flv)(?=")' | while read path
     do
       out=$(basename $path)
-      [[ -r .video/$out ]] || curl -Ls $video_domain$path -o .video/$out
-      if ! grep $out .video/list.txt; then
+      if [[ -r .video/$out ]]; then
+        echo -n "OK ";
+      else
+        echo -n "vv ";
+        curl -Ls $video_domain$path -o .video/$out
+      fi
+      if ! grep $out .video/list.txt > /dev/null; then
         echo "$out $i" >> .video/list.txt
       fi
       echo $out
