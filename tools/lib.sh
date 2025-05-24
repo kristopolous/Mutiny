@@ -962,7 +962,7 @@ get_videos() {
     cat $i/page.html | grep data-href | grep -Pio '(?<=")(.*mp4|.*avi|.*mkv|.*flv)(?=")' | while read path
     do
       out=$(basename $path)
-      [[ -r .video/$out ]] || curl -s $video_domain$path -o .video/$out
+      [[ -r .video/$out ]] || curl -Ls $video_domain$path -o .video/$out
       echo $out
     done
   done
