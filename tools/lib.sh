@@ -963,6 +963,9 @@ get_videos() {
     do
       out=$(basename $path)
       [[ -r .video/$out ]] || curl -Ls $video_domain$path -o .video/$out
+      if ! grep $out .video/list.txt; then
+        echo "$out $i" >> .video/list.txt
+      fi
       echo $out
     done
   done
