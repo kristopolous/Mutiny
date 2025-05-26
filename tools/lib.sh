@@ -89,7 +89,7 @@ debug() { [[ -n "$DEBUG" ]] && echo -e "\t$1"; }
 _doc['hr']="() generates a horizontal rule"
 hr() { echo; printf '\xe2\x80\x95%.0s' $( seq 1 $(tput cols) ); echo; }
 
-_doc['purge']="( what ) A manual CLI way to purge an album"
+_doc['purge']="( path ) A manual CLI way to purge an album"
 purge() { album_purge "CLI" "$1"; }
 
 _doc['quit']="[ internal ]"
@@ -106,7 +106,7 @@ check_for_stop() {
   fi
 }
 
-_doc['album_get']="( hostname1 ... hostnamen ) this is a pass-through to the album-get script"
+_doc['album_get']="( hostname1 ... hostnameN ) this is a pass-through to the album-get script"
 album_get() {
   $DIR/album-get $*
 }
@@ -187,6 +187,7 @@ breaker() {
   $player --ao=$ao $player_opts -really-quiet $tmp/breaker.mp3
 }
 
+_doc['ardy_stat']="( ([123T]|*), args ) Writes playlist stats to the arduino socket"
 ardy_stat() {
   {
     case $1 in
@@ -298,7 +299,7 @@ recent() {
   local first_date=${first##* }
   local days=$(( ($(date +%s) - $(date --date=$first_date +%s)) / 86400 ))
 
-  grep "20[2-4][0-9]" .listen_done | awk ' { print $NF } ' | sort | uniq -c
+  grep "20[2-4][0-9]" .listen_done | grep -v __skipping | awk ' { print $NF } ' | sort | uniq -c
   local ttl=$(wc -l < .listen_all).0
   local done=$(wc -l < .listen_done).0
   wc -l .listen*
@@ -385,6 +386,7 @@ resolve() {
   fi
 }
 
+_doc['pl_check']="[ internal ] "
 pl_check() {
   pl="$1/$PLAYLIST"
 
@@ -394,6 +396,7 @@ pl_check() {
     && rm "$pl"
 }
 
+_doc['pl_fallback']="[ internal ] "
 pl_fallback() {
   ( 
     shopt -u nullglob
@@ -577,7 +580,7 @@ _info () {
   echo
 }
 
-_doc['_ytdl']="(url, path) The wrapper function around the music-getting-tool (such as yt-dlp)"
+_doc['_ytdl']="( url, path ) The wrapper function around the music-getting-tool (such as yt-dlp)"
 _ytdl () {
   if [[ -z "$NONET" ]]; then
     local url="$1"
@@ -945,20 +948,23 @@ get_links() {
 
 _doc['get_videos']="() Gets all the videos"
 get_videos() {
-  label=$1
   video_domain="https://bandcamp.23video.com"
-  scrape_domain=${1}.bandcamp.com
-  if [[ -e $1/domain ]]; then
-    scrape_domain=$(< $1/domain)
-  fi
-
-  for i in $1/*; do
-    release=$(basename $i)
-    index=${scrape_domain}/album/${release}
-    echo https://$index
-    curl -s https://$index | grep data-href | grep -Pio '(?<=")(.*mp4|.*avi|.*mkv|.*flv)(?=")' | while read path
+  _mkdir .video
+  for i in */*; do
+    [[ ! -r  "$i"/page.html ]] && continue
+    grep data-href "$i/page.html" | grep -Pio '(?<=")(.*mp4|.*avi|.*mkv|.*flv)(?=")' | while read path
     do
-      echo :: $video_domain$path
+      out=$(basename $path)
+      if [[ -r .video/$out ]]; then
+        echo -n "OK ";
+      else
+        echo -n "vv ";
+        curl -Ls $video_domain$path -o .video/$out
+      fi
+      if ! grep $out .video/list.txt > /dev/null; then
+        echo "$out $i" >> .video/list.txt
+      fi
+      echo $out
     done
   done
 }
