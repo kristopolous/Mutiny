@@ -86,7 +86,7 @@ convert_songs() {
 }
 
 import_todb() {
-  fields="label,release,track,path,created_at"
+  fields="label,release,track,track_ix,path,created_at"
   cat $playtxt | awk -F '/' -f parser.awk > $playcsv
   {
   sqlite3 $playdb << ENDL
@@ -94,7 +94,7 @@ PRAGMA encoding=UTF8;
 .mode csv
 delete from tracks_temp;
 .import $playcsv tracks_temp
-insert or ignore into tracks(label,release,track,path,created_at) select * from tracks_temp;
+insert or ignore into tracks(label,release,track,track_ix,path,created_at) select * from tracks_temp;
 update tracks set version = "$version" where version is null;
 ENDL
 } #>& /dev/null
@@ -104,12 +104,13 @@ create_db() {
   truncate --size 0 $playdb
   rm $playdb
   sqlite3 $playdb << ENDL
-  create table tracks_temp(label text, release text, track text, path text, created_at date); 
+  create table tracks_temp(label text, release text, track text, track_ix int, path text, created_at date); 
   create table tracks(
     id INTEGER PRIMARY KEY,
     label text,
     release text,
     track text,
+    track_ix int,
     path text,
     created_at date,
     version text default "",
@@ -122,7 +123,7 @@ create index label_name on tracks(label);
 create index release_name on tracks(release);
 ENDL
 }
-#create_db
+create_db
 gen_playlist
 copy_songs
 import_todb

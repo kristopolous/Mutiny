@@ -169,6 +169,20 @@ function play_url(play) {
     });
 }
 
+function bail (){
+  // reset the failpoints.
+  parts = window.location.hash.split('/');
+  // track offset
+  parts[2] = 0;
+  // search term
+  parts[3] = '';
+  // quality
+  parts[4] = 2;
+  // recent
+  parts[5] = 1;
+  window.location.hash = parts.join('/');
+  location.reload();
+}
 function d(skip, orig) {
   if (!_DOM.controls.className) {
     let next = _next[skip];
@@ -204,7 +218,11 @@ function d(skip, orig) {
         _my = data.release;
         delete data.release;
         _next = data;
-        return play_url(_my.trackList[_my.track_ix]);
+        if(!_my.trackList || _my.track_ix == -1) {
+          bail();
+        } else {
+          return play_url(_my.trackList[_my.track_ix]);
+        }
       }
     });
   }
@@ -329,7 +347,9 @@ window.onload = () => {
             _filter,
           ].join("/");
         }
-        _lock.hash = 0;
+        window.setTimeout(() => {
+          _lock.hash = 0;
+        }, 10000);
       }
     }, 250);
   };
@@ -355,7 +375,6 @@ window.onload = () => {
       _DOM.list.innerHTML = "";
       _DOM.list.append(
         ...data.sort().map((obj, ix) => {
-          console.log(obj);
           let l = Object.assign(document.createElement("li"), {
             innerHTML: obj.track || obj.release || obj,
             obj,
@@ -435,6 +454,10 @@ window.onload = () => {
     }
   };
 
-  d(parsehash() ?? 0).then(_DOM.navcontrols.onclick);
+  try {
+    d(parsehash() ?? 0).then(_DOM.navcontrols.onclick);
+  } catch(ex) {
+    bail();
+  }
   window.addEventListener("hashchange", () => !_lock.hash && d(parsehash()));
 };
