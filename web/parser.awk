@@ -19,5 +19,5 @@ BEGIN {
     album=$6
   }
 
-  print quote($5), quote($6), ix, quote($7), quote(path), quote(formatted_date)
+  print quote($5), quote($6), quote($7), ix, quote(path), quote(formatted_date)
 }
