@@ -4,6 +4,21 @@ $_chrono = $_GET['chrono'] ?? false;
 $_releaseMap = [];
 $_dir = $_GET['orig'] ?? false;
 $_search = $_GET['q'] ?? false;
+$_filter = $_GET['filter'] ?? 1;
+
+function add_filter(&$where_list = null) {
+  global $_filter;
+  $where_str = null;
+  // if we mark "recent" we do an arbitrary # of days.
+  $stanza = "created_at >= datetime('now', '-30 days')";
+  if ($_filter == 0) {
+    $where_str = "where $stanza";
+    if($where_list !== null) {
+      $where_list[] = $stanza;
+    }
+  }
+  return $where_str;
+}
 
 function get($qstr, $params = [], $type = false) {
   global $_sql, $_search;
@@ -28,6 +43,9 @@ function get($qstr, $params = [], $type = false) {
   }
 
   $where_list = array_map(fn($v) => "$v = :$v", array_keys($params));
+  // this limits things, for instance, chronologically.
+  add_filter($where_list);
+
   if($_search) {
     $where_list[] = "path like :q";
     $params['q'] = "%${_search}%";
@@ -37,8 +55,8 @@ function get($qstr, $params = [], $type = false) {
   }
 
   $qstr .= " ${group} ${order} limit 1000";
+  error_log($qstr . json_encode($params));
   $prep = $_sql->prepare($qstr);
-  //error_log($qstr . json_encode($params));
   $prep->execute($params);
   return $prep->fetchAll($type);
 }
