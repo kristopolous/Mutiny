@@ -276,7 +276,7 @@ window.onload = () => {
     navigator.mediaSession.setActionHandler("pause", () => {
       _DOM.player.pause();
       Object.assign(navigator.mediaSession.metadata, {
-        title: "pause",
+        title: "Paused",
       });
       pauseFlag = true;
     });
@@ -288,7 +288,7 @@ window.onload = () => {
       await _DOM.player.play();
 
       Object.assign(navigator.mediaSession.metadata, {
-        title: "play",
+        title: "Play",
         artist: delta,
       });
       pauseFlag = false;
@@ -375,7 +375,6 @@ window.onload = () => {
       _DOM.list.innerHTML = "";
       _DOM.list.append(
         ...data.sort().map((obj, ix) => {
-          console.log(obj);
           let l = Object.assign(document.createElement("li"), {
             innerHTML: obj.track || obj.release || obj,
             obj,
@@ -409,7 +408,7 @@ window.onload = () => {
       }
     } else if (e.target.tagName == "LI") {
       if (_tab === "track" || _tab === "release") {
-        ix = e.target.ix;
+        ix = e.target.obj.track_ix;
         _my = e.target.obj;
       } else {
         _my[_tab] = e.target.innerHTML;
@@ -417,6 +416,7 @@ window.onload = () => {
           _my.release = "";
         }
       }
+      console.log(_my);
       d(ix).then(_DOM.navcontrols.onclick);
     }
   };
