@@ -276,7 +276,7 @@ window.onload = () => {
     navigator.mediaSession.setActionHandler("pause", () => {
       _DOM.player.pause();
       Object.assign(navigator.mediaSession.metadata, {
-        title: "pause",
+        title: "Paused",
       });
       pauseFlag = true;
     });
@@ -288,7 +288,7 @@ window.onload = () => {
       await _DOM.player.play();
 
       Object.assign(navigator.mediaSession.metadata, {
-        title: "play",
+        title: "Play",
         artist: delta,
       });
       pauseFlag = false;
