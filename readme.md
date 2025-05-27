@@ -1,4 +1,4 @@
-# Mutiny: A music explorer
+# Mutiny: Intentionally Underground Music Explorer
 
 Services like spotify don't cut it. They end up tending towards some definition of collective approval, some kind of popular.
 
