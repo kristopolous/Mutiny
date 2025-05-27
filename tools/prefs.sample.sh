@@ -32,3 +32,7 @@
 # Any of those. Yes.
 #
 #############################
+#FMT=mp3
+#player=mpv
+#BACKUPDIR=$HOME/.mutiny
+#UNDODIR=$tmp/undo
