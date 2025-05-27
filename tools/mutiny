@@ -58,7 +58,7 @@ function playit() {
   [[ $# == 0 ]] && return -10
   before=$( date +%s )
 
-  $player --ao=$ao $player_opts \
+  $PLAYER --ao=$ao $player_opts \
     --term-playing-msg=" \${playlist-pos-1}\t\${media-title}" \
     --term-status-msg="\t\t\${audio-pts} - \${duration}" \
     --start=$start_time \

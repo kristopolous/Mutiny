@@ -33,6 +33,6 @@
 #
 #############################
 #FMT=mp3
-#player=mpv
+#PLAYER=mpv
 #BACKUPDIR=$HOME/.mutiny
 #UNDODIR=$tmp/undo
