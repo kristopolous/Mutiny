@@ -19,7 +19,7 @@ NOUNDO=${NOUNDO:=}
 # If left unset, will use the localhost
 HOST=
 
-player=mpv
+PLAYER=mpv
 player_opts_orig='--no-cache --no-audio-display --msg-level=cplayer=no --term-playing-msg=\n${media-title} --script='"$DIR"'/mpv-interface.lua --input-ipc-server='"$tmp"'/mpvsocket'
 player_opts_dbg="--msg-level=all=debug"
 player_opts=$player_opts_orig
@@ -184,7 +184,7 @@ breaker() {
     done
     ffmpeg -safe 0 -loglevel quiet -f concat -i <(ls -v1 $tmp/out-*.wav | sed -e 's/^/file /g') -y $tmp/breaker.mp3
   fi
-  $player --ao=$ao $player_opts -really-quiet $tmp/breaker.mp3
+  $PLAYER --ao=$ao $player_opts -really-quiet $tmp/breaker.mp3
 }
 
 _doc['ardy_stat']="( ([123T]|*), args ) Writes playlist stats to the arduino socket"
