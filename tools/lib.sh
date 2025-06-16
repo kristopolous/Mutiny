@@ -665,7 +665,11 @@ tom5a() {
 
   out="${in/.mp3/.m5a}"
   if [[ ! -s "$out" ]] ; then
-    ffmpeg -nostdin -loglevel quiet -i "$in" -write_xing 0 -id3v2_version 0 -vn -ac 2 -f wav - | fdkaac -S -b 32000 -p 29 /dev/stdin -o "$out"
+    if command -v fdkaac > /dev/null; then
+      ffmpeg -nostdin -loglevel quiet -i "$in" -write_xing 0 -id3v2_version 0 -vn -ac 2 -f wav - | fdkaac -S -b 32000 -p 29 /dev/stdin -o "$out"
+    else
+      _warn "fdkaac not found"
+    fi
   fi
 }
 
