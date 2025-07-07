@@ -401,7 +401,7 @@ pl_fallback() {
   ( 
     shopt -u nullglob
     cd "$1"
-    ls -1 -- *.{$FMT,ogg,m4a,flac,aiff,wav} > $PLAYLIST 2> /dev/null
+    ls -1 -- *.{$FMT,mp3,ogg,m4a,flac,aiff,wav} > $PLAYLIST 2> /dev/null
     shopt -s nullglob
   )
 }
@@ -569,7 +569,7 @@ _info () {
     [[ $url =~ 'album' ]] && matcher='track-title' || matcher='trackTitle'
 
     _info_section "Tracks"      "$(cat "$path/$PAGE" | tr '\n' ' ' | grep -Po '((?<='$matcher'">).*?(?=<))' | sed -E 's/^\s*//g' | awk ' { print FNR". "$0 } ')"
-    _info_section "Files"       "$(cd "$path"; ls -l *.{$FMT,ogg,m4a,flac,aiff,wav} 2> /dev/null)" 
+    _info_section "Files"       "$(cd "$path"; ls -l *.{$FMT,mp3,ogg,m4a,flac,aiff,wav} 2> /dev/null)" 
     _info_section "URLs"        "$(for x in $path/*.$FMT; do _trackpath "$x"; done)"
     _info_section "PLS entries" "$(cat "$path/playlist.m3u")"
 

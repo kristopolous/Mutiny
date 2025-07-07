@@ -245,7 +245,7 @@ while [[ ${#all[@]} -gt $ix ]]; do
                 skipprompt=
                 ;;
               8)
-                n=p
+                [[ -n "$NOSCORE" ]] && n=p
                 skipprompt=1 
                 ;;
 
@@ -302,8 +302,12 @@ while [[ ${#all[@]} -gt $ix ]]; do
         # to decrease network iops, we check the arity of the function
         # to see if these files exist
         # FMT will make it go double-time so we uniq things (sort -u)
-        ls $start_dir/"$i"/*.{$FMT,mp3,ogg,m4a,m5a,flac,aiff,wav} | sort -u > $tmp/play.m3u
-        playit $tmp/play.m3u
+        if [[ "$FMT" == "mp3" ]]; then 
+          ls $start_dir/"$i"/*.{mp3,ogg,m4a,m5a,flac,aiff,wav} | sort -u > $tmp/play.m3u
+        else 
+          compgen -G "$start_dir/$i/*.$FMT" | sort -u > $tmp/play.m3u
+        fi
+        [[ -s "$tmp/play.m3u" ]] && playit $tmp/play.m3u
 
         if [[ $? != -10 ]]; then
           (( listen_time += $(date +%s) - before ))
