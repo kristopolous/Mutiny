@@ -102,9 +102,9 @@ iframe {
 }
 .out {
   transition: opacity .6s ease-out .6s;
-  opacity: 0
+  opacity: 0;
+  z-index:-1;
 }
-
 
 #lhs { 
   margin-right: calc(.01 * 321px);
