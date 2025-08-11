@@ -15,6 +15,7 @@ var _track = {},
   _filter = 1,
   _DOM = {},
   _lock = {},
+  _start_at_start = false,
   path_to_url = (str) =>
     "https://bandcamp.com/EmbeddedPlayer/size=large/bgcol=333333/linkcol=ffffff/transparent=true/track=" +
     str.match(/(\d*).mp3$/)[1],
@@ -437,11 +438,19 @@ window.onload = () => {
   };
 
   _DOM.player.addEventListener("durationchange", (e) => {
-    e.target.currentTime = (_DOM.start.value / 100) * e.target.duration;
+    // this is a one off ignoring of the start
+    if (_start_at_start) {
+      _start_at_start = false;
+    } else {
+      e.target.currentTime = (_DOM.start.value / 100) * e.target.duration;
+    }
     _DOM.player.play();
   });
 
   _DOM.player.onended = () => {
+    // we want to differentiate this track forward from the tapped one
+    // in order to go to the beginning of the track
+    _start_at_start = true;
     d("+track");
     if (_format > 1) {
       Notification.requestPermission().then((p) => {
