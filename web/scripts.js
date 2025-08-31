@@ -59,6 +59,11 @@ function parsehash() {
 }
 
 function play_url(play) {
+  if (!play) {
+    window.location.hash = "";
+    window.location.reload();
+  }
+
   let src = path_to_url(play.path),
     ifr,
     fake = _track.path === play.path,
