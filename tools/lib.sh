@@ -150,7 +150,7 @@ function finish {
 _doc['scan']='() Finds a list of files to shuffle through'
 scan()  { 
   if [[ -z "$NOSCAN" ]]; then
-    echo */* | tr ' ' '\n' > $tmp/.listen_all
+    echo */* | tr ' ' '\n' | shuf > $tmp/.listen_all
     if [[ -s $tmp/.listen_all ]]; then 
       cp $tmp/.listen_all $start_dir/.listen_all
     else 
@@ -279,12 +279,12 @@ unlistened() {
   topl=$start_dir/.listen_all
 
   if [[ ! -e $topl ]]; then
-    find . -mindepth 2 -maxdepth 2 -type d | sed s'/^..//' | shuf
+    find . -mindepth 2 -maxdepth 2 -type d | sed s'/^..//' 
   else
     if [[ -n "$NOSCORE" ]]; then
-      $cmd $start_dir/.listen_all | cut -d ' ' -f 1 | shuf
+      $cmd $start_dir/.listen_all | cut -d ' ' -f 1 
     else
-      $cmd $start_dir/.listen_all $start_dir/.listen_done | cut -d ' ' -f 1 | sort | uniq -u | shuf
+      $cmd $start_dir/.listen_all $start_dir/.listen_done | cut -d ' ' -f 1 | awk '{count[$0]++} END {for (line in count) if (count[line] == 1) print line}'
     fi
   fi
 }
