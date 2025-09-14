@@ -274,6 +274,8 @@ window.onload = () => {
     .split(" ")
     .forEach((what) => (_DOM[what] = document.getElementById(what)));
 
+  _DOM.start.value = +window.localStorage.mutiny_start;
+
   if (self.MediaMetadata) {
     let pauseFlag = false,
       toggleTime;
@@ -451,6 +453,10 @@ window.onload = () => {
     }
     _DOM.player.play();
   });
+
+  _DOM.start.onchange = (e) => {
+    window.localStorage.mutiny_start = e.target.value;
+  }
 
   _DOM.player.onended = () => {
     // we want to differentiate this track forward from the tapped one
