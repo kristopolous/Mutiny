@@ -1,7 +1,6 @@
 local os = require 'os'
 local io = require 'io'
 local pfx = '/tmp/mutiny/eb383810f22a-'
-local posix = require 'posix'
 local tools = os.getenv('DIR') .. '/'
 
 mp.enable_messages('error')
@@ -136,6 +135,7 @@ mp.add_key_binding('P', 'purge', function()
 end)
 
 mp.add_key_binding('e', 'env', function() 
+  local posix = require 'posix'
   for i, s in pairs(posix.getenv()) do
     print(i, s)
   end
