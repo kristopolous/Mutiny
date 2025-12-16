@@ -151,20 +151,21 @@ function play_url(play) {
       // I think these remediations are just voodoo ... I don't know what
       // the real bug is.
       if (navigator.mediaSession) {
+        let title_disp = title.replace(/-\d+.{4}$/, '');
+        let album_disp = play.release.replace(/\-/g, ' ');
         Object.assign(
           navigator.mediaSession.metadata,
           {
-            title,
+            title: title_disp,
             artist,
-            album: play.release,
+            album: album_disp
           },
           _format < 2
             ? {}
             : {
               artwork: [96, 128, 192, 256, 384, 512].map((r) => {
                 return {
-                  src:
-                    play.path.replace(/\/[^\/]*$/, "") + `/album-art.jpg`,
+                  src: play.path.replace(/\/[^\/]*$/, "") + `/album-art.jpg`,
                   sizes: `${r}x${r}`,
                   type: "image/jpeg",
                 };
