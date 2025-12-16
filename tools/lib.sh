@@ -141,10 +141,28 @@ prefs() {
   exit 0
 }
 
+_doc['define']='() See what the current variables are set at'
+define() {
+ cat $DIR/lib.sh $DIR/mutiny | grep -E "^[A-Z]+=" | cut -d '=' -f 1 | sort | uniq | while read i; do
+   printf '%s\t "%s"' "$i" "${!i}"
+   echo
+ done
+}
+
 _doc['finish']='[ deprecated ]'
 function finish {
   history -w $tmp/readline-history
   exit
+}
+
+_doc['edit']='( file ) Edit one of the mutiny files'
+edit() {
+  if [[ -z "$1" ]]; then
+    echo $DIR
+    ls "$DIR"
+  else
+    $EDITOR "$DIR/$1"
+  fi
 }
 
 _doc['scan']='() Finds a list of files to shuffle through'

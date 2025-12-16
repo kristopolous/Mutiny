@@ -11,16 +11,13 @@ if ! declare -f $1 > /dev/null; then
     type $2 || echo ${!2}
   else
 
+    tabs 1,2,+6,+14,+18,+5,+5
     headline 1 variables
-    (declare -p; bash -l -c "source /etc/profile;declare -p" ) |\
-	    cut -c 12- | sort -t'=' -k1,1 | grep -v BASH |\
-	    awk -F '=' -v counter=0 -v last= '{ if ($1 != last) { if (counter == 0) { printf ("%-20s%s\n", last, lastval); } last=$1; lastval=$2; counter=0} else { counter++;  }; } ' |\
-	    sed 's/^/\t\t/'
+    define | sed s'/^/\t\t/g'
 
     headline 1 functions
-    tabs 6,+14,+18,+5,+5
     for i in $(declare -F | sed s/'declare -f//g' | sort); do
-      [[ "${_doc[$i]}" =~ (internal|deprecated) ]] || printf "\t%s\t %s\n" $i "${_doc[$i]}"
+      [[ "${_doc[$i]}" =~ (internal|deprecated) ]] || printf "\t\t%s\t %s\n" $i "${_doc[$i]}"
     done
   fi
   exit 1
@@ -29,3 +26,4 @@ fn=$1
 shift
 
 $fn "$@"
+tabs -8
