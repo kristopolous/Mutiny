@@ -10,8 +10,8 @@ function add_filter(&$where_list = null) {
   global $_filter;
   $where_str = null;
   // if we mark "recent" we do an arbitrary # of days.
-  $stanza = "created_at >= datetime('now', '-30 days')";
   if ($_filter == 0) {
+    $stanza = "created_at >= datetime('now', '-30 days')";
     $where_str = "where $stanza";
     if($where_list !== null) {
       $where_list[] = $stanza;
@@ -64,7 +64,7 @@ function get($qstr, $params = [], $type = false) {
 function get_tracks($label = '', $release = '') {
   global $_releaseMap;
   if(!isset($_releaseMap["$label:$release"])) {
-    $res = get("select track, path, label, release from tracks", ['label' => $label, 'release' => $release]);
+    $res = get("select track, track_ix, path, label, release from tracks", ['label' => $label, 'release' => $release]);
     for($ix = 0; $ix < count($res); $ix++) {
       $res[$ix]['id'] = empty($release) ? 0 : $ix;
     }
@@ -178,15 +178,11 @@ function navigate($label, $release, $action, $final = false) {
     // all the releases
 
     if($ttl === 0) {
-      return compact('labelList', 'releaseList');
-      // we need to redo everything! Auckkk
-      // this will take our search string
-      $releaseList = get_releases();
-      $ttl = count($releaseList);
-      if(!$ttl) {
+      if(strlen($_search) > 0) {
         return compact('labelList', 'releaseList');
+      } else {
+        return navigate($label, $release, $action[0] . 'label');
       }
-      return $releaseList;
     }
     if($release) {
       $release_ix = array_search($release, $releaseList);
