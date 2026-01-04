@@ -250,8 +250,8 @@ status() {
 _doc['backup']="() Backs up the important listen record files to a date based timestamp"
 backup() {
   _mkdir $BACKUPDIR
-  backupname=$(date +%Y%m%d).tbz#
-  [[ -e dl_history ]] || return
+  backupame=$(date +%Y%m%d).tbz
+  [[ -e .dl_history ]] || return
   tar cjf $BACKUPDIR/$backupname .dl_history .listen_all .listen_done
   debug "Backing up to $BACKUPDIR/$backupname"
 }
