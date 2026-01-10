@@ -32,6 +32,7 @@ REMOTE=${REMOTE:=localhost}
 REMOTEBASE=${REMOTEBASE:=$PWD}
 
 DEBUG=${DEBUG:=}
+[[ -n "$DEBUG" ]] && set -x
 
 # Performance monitor
 TIMEIT=${TIMEIT:=}
