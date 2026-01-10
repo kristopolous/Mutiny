@@ -126,6 +126,11 @@ while [[ ${#all[@]} -gt $ix ]]; do
   listen_time=0
 
   timeit "before record"
+
+  # There's some historic issue on playlist item duplication. This
+  # is a lazy fix at runtime
+  readarray -t _uniq < <(uniq "$m3u")
+  printf "%s\n" "${_uniq[@]}" > "$m3u"
   t_count=$(cat "$m3u" 2> /dev/null | wc -l)
 
   # We assume the directory exists unless this fails 

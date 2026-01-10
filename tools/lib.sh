@@ -176,7 +176,7 @@ scan()  {
       info "Unable to create playlist scan"
     fi
   else 
-    debug "Skipping scan"; 
+    debug "Skipping scan"
   fi
 }
 
@@ -303,7 +303,11 @@ unlistened() {
     if [[ -n "$NOSCORE" ]]; then
       $cmd $start_dir/.listen_all | cut -d ' ' -f 1 
     else
-      $cmd $start_dir/.listen_all $start_dir/.listen_done | cut -d ' ' -f 1 | awk '{count[$0]++} END {for (line in count) if (count[line] == 1) print line}'
+      comm -13\
+          <(cut -d ' ' -f 1 $start_dir/.listen_done | sort) \
+          <(sort $start_dir/.listen_all) \
+      | shuf --random-source=<(yes 24) \
+      | $cmd
     fi
   fi
 }
