@@ -482,7 +482,7 @@ get_playlist() {
         sed -E 's/^([^-]*)\s?-?\s?(.*$)/compgen -G "\0"* || compgen -G "\2"*;/' >> $PLAYLIST_DBG
     } 2> /dev/null
   
-    /bin/bash $PLAYLIST_DBG | grep $FMT | sed -E 's/^/.\//g' > "$path/$PLAYLIST"
+    /bin/bash $PLAYLIST_DBG | grep $FMT | sed -E 's/^/.\//g' | uniq > "$path/$PLAYLIST"
   else
     info "Network is toggled off. Skipping playlist" 
   fi
