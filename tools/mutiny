@@ -129,8 +129,10 @@ while [[ ${#all[@]} -gt $ix ]]; do
 
   # There's some historic issue on playlist item duplication. This
   # is a lazy fix at runtime
-  readarray -t _uniq < <(uniq "$m3u")
-  printf "%s\n" "${_uniq[@]}" > "$m3u"
+  if [[ -r "$m3u" ]]; then
+      readarray -t _uniq < <(uniq "$m3u")
+      printf "%s\n" "${_uniq[@]}" > "$m3u"
+  fi
   # cat "$m3u"
   t_count=$(cat "$m3u" 2> /dev/null | wc -l)
 
