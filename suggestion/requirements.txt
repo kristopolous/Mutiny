@@ -1,0 +1,4 @@
+discogs_client
+redis
+requests-cache
+python-dotenv
