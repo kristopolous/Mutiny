@@ -424,8 +424,8 @@ pl_fallback() {
   ( 
     shopt -u nullglob
     cd "$1"
-    echo "PLAYLIST CREATION"
-    ls -1 -- *.{$FMT,mp3,ogg,m4a,flac,aiff,wav} > $PLAYLIST 2> /dev/null
+    echo "PLAYLIST CREATION mm"
+    ls -1 -- *.{$FMT,mp3,ogg,m4a,flac,aiff,wav} | uniq > $PLAYLIST 2> /dev/null
     shopt -s nullglob
   )
 }
@@ -465,7 +465,7 @@ open_page() {
 
 _doc['get_playlist']="[ internal ] "
 get_playlist() {
-  echo PLAYLIST CREATION
+  echo PLAYLIST CREATION GG
   PLAYLIST_DBG=$tmp/playlist-interim:$(_stub "$2"):$(date +%s)
   local failed=
   local tomatch=

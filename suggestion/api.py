@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import discogs_client
-import secrets
+import os
+from dotenv import load_dotenv
 import redis
 import json
 import sys
+
+load_dotenv()
 import operator
 import re
 import pdb
@@ -28,7 +31,7 @@ discogs_client.fetchers.Fetcher.__init__ = cachie
 labelMap = {}
 _artistMap = {}
 
-d = discogs_client.Client('ExampleApplication/0.1', user_token=secrets.USER_TOKEN)
+d = discogs_client.Client('ExampleApplication/0.1', user_token=os.getenv('DISCOGS_USER_TOKEN'))
 r = redis.Redis(host='localhost', port=6379, db=0)
 
 if len(sys.argv) < 2:
@@ -40,7 +43,7 @@ print(search)
 res = d.search(search, type='release')
 
 if len(res) == 0:
-  search  = re.sub('^[0-9\. ]*', '', search)
+  search  = re.sub(r'^[0-9\. ]*', '', search)
   print(search)
   res = d.search(search, type='release')
 
