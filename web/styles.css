@@ -47,8 +47,8 @@ input {
   color: #ebebeb;
   font-size: 1rem;
   font-family: 'BenchNine', sans-serif;
-  width: 321px;
   font-weight: 700;
+  width: 321px;
   text-indent: .5rem;
   margin-bottom: .5rem;
 }
@@ -56,8 +56,8 @@ input {
 h2 {
   margin: 0.15rem 0.15rem 0 0.15rem;
   font-size: 1.50rem;
-  line-height: 1.4rem;
   font-weight: 300;
+  line-height: 1.4rem;
   display: inline;
 }
 
@@ -121,6 +121,9 @@ iframe {
   width: 100%;
   padding: .5rem 0; 
   font-size: 1.4rem; 
+}
+button {
+  font-family: 'BenchNine', sans-serif;
 }
 
 #controls a {
