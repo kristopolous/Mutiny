@@ -424,8 +424,7 @@ pl_fallback() {
   ( 
     shopt -u nullglob
     cd "$1"
-    echo "PLAYLIST CREATION mm"
-    ls -1 -- *.{$FMT,mp3,ogg,m4a,flac,aiff,wav} | uniq > $PLAYLIST 2> /dev/null
+    ls -1 -- *.{$FMT,mp3,ogg,m4a,flac,aiff,wav} 2> /dev/null | uniq > $PLAYLIST 2> /dev/null
     shopt -s nullglob
   )
 }
