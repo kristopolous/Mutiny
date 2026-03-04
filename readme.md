@@ -10,7 +10,7 @@ All these systems suck and it's one of the primary reasons pop music has stagnat
 
 So I wanted a tool for exploring a mix of variability, consistency and novelty that expanded my horizons without these vanishing gradient properties.
 
-This is my fourth attempt, since 2006 or so, of building that tool, this one starting in 2020.
+This is my fourth attempt, since 2006, of building that tool, this one starting in 2020.
 
 ## Overview
 
