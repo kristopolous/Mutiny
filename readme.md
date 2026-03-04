@@ -1,12 +1,12 @@
 # Mutiny: Intentionally Underground Music Explorer
 
-Services like spotify don't cut it. They end up tending towards some definition of collective approval, some kind of popular.
+Services like Spotify don't cut it: they end up tending towards some definition of collective approval, some kind of popular.
 
-Other systems try to classify music and look for similar orchestration and structure. Wrong again. that's not what new music is about.
+Other systems try to classify music and look for similar orchestration and structure. Wrong again. That's not what new music is about.
 
-The random walk of discovery systems such as youtube music recommendation would eventually tend towards mainstream indy or pop artists and then form a tightly clustered and repetitive network around them. 
+The random walk of discovery systems such as Youtube music recommendation eventually tend towards mainstream indy or pop artists and then form a tightly clustered and repetitive network around them. 
 
-All these systems suck and it's one of the primary reasons pop music has stagnated since their rise,
+All these systems suck and it's one of the primary reasons pop music has stagnated since their rise.
 
 So I wanted a tool for exploring a mix of variability, consistency and novelty that expanded my horizons without these vanishing gradient properties.
 
