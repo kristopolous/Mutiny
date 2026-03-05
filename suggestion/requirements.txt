@@ -1,4 +1,4 @@
-discogs_client
+neo4j
 redis
-requests-cache
+requests
 python-dotenv
