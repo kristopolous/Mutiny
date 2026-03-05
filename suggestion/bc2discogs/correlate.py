@@ -12,6 +12,10 @@ from html import unescape
 import discogs_client
 from dotenv import load_dotenv
 
+# Add parent directory to path to import cache module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cache import get_redis_client
+
 load_dotenv()
 
 
@@ -146,6 +150,42 @@ def score_match(parsed_data, discogs_release):
     return confidence, reasons
 
 
+def resolve_html_path(path):
+    """
+    Resolve input path to an actual page.html file.
+    
+    If path is a directory, looks for page.html inside it.
+    If path is a file, returns it directly.
+    
+    Args:
+        path: User-provided path (directory or file)
+        
+    Returns:
+        str: Absolute path to page.html file
+        
+    Raises:
+        ValueError: If page.html not found in directory or path invalid
+    """
+    if os.path.isfile(path):
+        return path
+    
+    if os.path.isdir(path):
+        page_html = os.path.join(path, 'page.html')
+        if os.path.isfile(page_html):
+            return page_html
+        else:
+            raise ValueError(f"No page.html found in directory: {path}")
+    
+    raise ValueError(f"Path does not exist: {path}")
+
+
+def get_cache_key(html_path):
+    """Generate a cache key based on the resolved file path."""
+    # Use absolute normalized path as cache key - it's unique and debuggable
+    abs_path = '/'.join(os.path.abspath(html_path).split('/')[-3:-1])
+    return f"bc2:{abs_path}"
+
+
 def get_discogs_data(release):
     """Extract relevant data from a Discogs release object."""
     data = {
@@ -159,6 +199,9 @@ def get_discogs_data(release):
         'labels': [getattr(l, 'name', '') for l in getattr(release, 'labels', [])],
         'formats': [getattr(f, 'name', '') for f in getattr(release, 'formats', [])],
     }
+    # Ensure we have a usable Discogs web URL; construct from ID if needed
+    if not data['uri'] and data['id']:
+        data['uri'] = f"https://www.discogs.com/release/{data['id']}"
     return data
 
 
@@ -187,72 +230,128 @@ def correlate(html_path, client):
             })
     
     matches.sort(key=lambda x: x['confidence'], reverse=True)
-    
     return matches
 
 
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description='Match Bandcamp releases to Discogs'
+        description='Match Bandcamp releases to Discogs using locally saved page.html files. '
+                    'Results are cached in Redis to minimize API calls.'
     )
     parser.add_argument(
         'input',
-        help='Bandcamp URL or path to page.html'
+        help='Path to a Bandcamp release directory (containing page.html) or directly to a page.html file'
     )
     parser.add_argument(
         '-o', '--output',
         type=argparse.FileType('w'),
         default=sys.stdout,
-        help='Output file (default: stdout)'
+        help='Write results to FILE; defaults to stdout'
     )
     parser.add_argument(
         '-j', '--json',
         action='store_true',
-        help='Output as JSON'
+        help='Output matches in JSON format for programmatic consumption'
     )
     parser.add_argument(
         '--token',
-        help='Discogs user token (or set DISCOGS_USER_TOKEN env var)'
+        help='Discogs user token (overrides DISCOGS_USER_TOKEN environment variable)'
     )
     
     args = parser.parse_args()
     
-    token = args.token or os.getenv('DISCOGS_USER_TOKEN')
-    if not token:
-        print("Error: DISCOGS_USER_TOKEN not set", file=sys.stderr)
-        sys.exit(1)
+    try:
+        # Reject URL inputs
+        if args.input.startswith('http'):
+            print("URL input not supported. Provide a path to a page.html file or its containing directory.", file=sys.stderr)
+            sys.exit(1)
+        
+        # Resolve input to actual page.html path
+        try:
+            html_path = resolve_html_path(args.input)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        
+        cache_key = get_cache_key(html_path)
+        r = get_redis_client()
+        cached_url = r.get(cache_key)
+        if cached_url is not None:
+            # Cache hit: decode bytes and output URL only
+            url = cached_url.decode('utf-8') if isinstance(cached_url, bytes) else str(cached_url)
+            if url:  # Non-empty means we have a match
+                if args.json:
+                    json.dump({"url": url}, args.output)
+                else:
+                    args.output.write(url + '\n')
+                sys.exit(0)
+            else:  # Empty cached value means previous attempt found no match
+                print(f"No matches found (cached) for {cache_key}", file=sys.stderr)
+                sys.exit(1)
+        
+        # Cache miss: need to call Discogs API
+        token = args.token or os.getenv('DISCOGS_USER_TOKEN')
+        if not token:
+            print("Error: DISCOGS_USER_TOKEN not set", file=sys.stderr)
+            sys.exit(1)
+        client = discogs_client.Client('Correlate/1.0', user_token=token)
+        matches = correlate(html_path, client)
+        if matches is None:
+            print("Failed to parse HTML file. Check that it contains a valid meta description.", file=sys.stderr)
+            sys.exit(1)
+        
+        # Extract URL from best match (if any)
+        if matches:
+            best = matches[0]
+            url = best['discogs_release'].get('uri', '')
+            if not url and best['discogs_release'].get('id'):
+                url = f"https://www.discogs.com/release/{best['discogs_release']['id']}"
+        else:
+            url = ''
+        
+        # Cache the URL (avoid repeated lookups)
+        try:
+            r.setex(cache_key, 3600, url)
+        except Exception:
+            pass
+        
+        if not matches:
+            # No matches: show helpful error with artist/release info
+            parsed = parse_html(html_path)
+            if parsed:
+                artist = parsed.get('artist_name', 'unknown')
+                release = parsed.get('release_name', 'unknown')
+                print(f"No matches found for {artist} - {release} ({cache_key})", file=sys.stderr)
+            else:
+                print(f"No matches found for {cache_key}", file=sys.stderr)
+            sys.exit(1)
+        
+        # Output full match information
+        if args.json:
+            json.dump(matches, args.output, indent=2)
+        else:
+            for match in matches:
+                args.output.write(f"\n{'='*60}\n")
+                args.output.write(f"Source: {match['source_file']}\n")
+                args.output.write(f"Artist: {match['parsed_data']['artist_name']}\n")
+                args.output.write(f"Release: {match['parsed_data']['release_name']}\n")
+                args.output.write(f"Discogs: {match['discogs_release']['title']} (ID: {match['discogs_release']['id']})\n")
+                # Show this match's URL
+                match_url = match['discogs_release'].get('uri')
+                if not match_url and match['discogs_release'].get('id'):
+                    match_url = f"https://www.discogs.com/release/{match['discogs_release']['id']}"
+                if match_url:
+                    args.output.write(f"URL: {match_url}\n")
+                args.output.write(f"Confidence: {match['confidence']:.2%}\n")
+                if match['match_reasons']:
+                    args.output.write("Reasons:\n")
+                    for reason in match['match_reasons']:
+                        args.output.write(f"  - {reason}\n")
     
-    client = discogs_client.Client('Correlate/1.0', user_token=token)
-    
-    if args.input.startswith('http'):
-        print("URL input not yet implemented. Use path to page.html", file=sys.stderr)
-        sys.exit(1)
-    
-    if not os.path.exists(args.input):
-        print(f"Error: {args.input} not found", file=sys.stderr)
-        sys.exit(1)
-    
-    matches = correlate(args.input, client)
-    
-    if args.json:
-        json.dump(matches, args.output, indent=2)
-    else:
-        for match in matches:
-            args.output.write(f"\n{'='*60}\n")
-            args.output.write(f"Source: {match['source_file']}\n")
-            args.output.write(f"Artist: {match['parsed_data']['artist_name']}\n")
-            args.output.write(f"Release: {match['parsed_data']['release_name']}\n")
-            args.output.write(f"Discogs: {match['discogs_release']['title']} (ID: {match['discogs_release']['id']})\n")
-            args.output.write(f"Confidence: {match['confidence']:.2%}\n")
-            if match['match_reasons']:
-                args.output.write("Reasons:\n")
-                for reason in match['match_reasons']:
-                    args.output.write(f"  - {reason}\n")
-    
-    if not matches:
-        print("No matches found", file=sys.stderr)
-        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        sys.exit(130)  # 128 + SIGINT = 130
 
 
 if __name__ == '__main__':
