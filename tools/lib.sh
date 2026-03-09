@@ -64,7 +64,6 @@ start_dir=$( pwd )
 start_time=$( date +%s )
 direct=
 declare -A _doc
-_mkdir "$tmp"
 
 # some simple things first.
 _doc['_rm']="[ internal ]"
@@ -72,6 +71,8 @@ _rm () { [[ -e "$1" ]] && rm "$1"; }
 
 _doc['_mkdir']="[ internal ]"
 _mkdir() { [[ -e "$1" ]] || mkdir -p "$1"; }
+
+_mkdir "$tmp"
 
 _doc['_tabs']="[ internal ]"
 _tabs() { tabs 2,+4,+2,+10; }
