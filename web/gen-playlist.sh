@@ -52,10 +52,10 @@ convert_songs() {
     if [[ ! -s "$p" ]]; then
       echo "path $p doesn't exist"
     else 
-      $CODE/tools/mpv-lib toopus "$p" &
+      $CODE/tools/mutlib toopus "$p" &
       pid_opus=$!
 
-      $CODE/tools/mpv-lib tom5a "$p" &
+      $CODE/tools/mutlib tom5a "$p" &
       pid_m5a=$!
 
       wait $pid_opus
@@ -72,14 +72,16 @@ convert_songs() {
         echo " - ($path_m5a)"
         echo " - ($path_opus)"
       fi
+
+      ## batch insertion
       if (( n > 80 )); then
-        echo ""
         sqlite3 $playdb < conv_update.sql
         truncate --size 0 conv_update.sql
         n=0
       fi
     fi
   done
+
   sqlite3 $playdb < conv_update.sql
   truncate --size 0 conv_update.sql
   dbg "converting done"
@@ -127,4 +129,4 @@ create_db
 gen_playlist
 copy_songs
 import_todb
-#convert_songs
+convert_songs
