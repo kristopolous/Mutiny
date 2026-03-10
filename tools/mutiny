@@ -101,6 +101,33 @@ iop() {
   }
 }
 
+pexit_flags() {
+    ## See the lua script for how this is invoked
+    case $1 in 
+      13|14|15)
+        # 4 is what mpv does on ctrl+c
+        # so we add 10 to avoid the collision
+        n=$(( player_exit - 10 ))
+        skipprompt=1 
+        ;;
+      8)
+        [[ -n "$NOSCORE" ]] && n=p
+        skipprompt=1 
+        ;;
+      6)
+        n=s
+        skipprompt=1 
+        ;;
+      7)
+        NOPROMPT=
+        skipprompt=
+        ;;
+      5) 
+        player_exit=0 
+        ;;
+    esac
+}
+
 start=$(date +%s.%N)
 last_ts=$start
 while [[ ${#all[@]} -gt $ix ]]; do
@@ -232,31 +259,11 @@ while [[ ${#all[@]} -gt $ix ]]; do
             fi
             timeit "player"
             playit "$m3u"
-            player_exit=$?
+            pexit_flags $?
 
             ( ardy_stat 2 "..done.." ) &
 
-            ## See the lua script for how this is invoked, (as of this writing it's capital Q)
             case $player_exit in 
-              13|14|15)
-                # 4 is what mpv does on ctrl+c
-                # so we add 10 to avoid the collision
-                n=$(( player_exit - 10 ))
-                skipprompt=1 
-                ;;
-              6)
-                n=s
-                skipprompt=1 
-                ;;
-              7)
-                NOPROMPT=
-                skipprompt=
-                ;;
-              8)
-                [[ -n "$NOSCORE" ]] && n=p
-                skipprompt=1 
-                ;;
-
               [0-4])
                 echo "Exited with $player_exit!"
                 # Network drives such as those by autofs cifs
@@ -266,13 +273,6 @@ while [[ ${#all[@]} -gt $ix ]]; do
 
                 # if it exited naturally we send an audio indicator
                 breaker
-                ;;
-
-              5) player_exit=0 
-                ;;
-
-              *)
-                echo "Exited with $player_exit!"
                 ;;
             esac
 
@@ -315,9 +315,15 @@ while [[ ${#all[@]} -gt $ix ]]; do
         else 
           compgen -G "$start_dir/$i/*.$FMT" | sort -u > $tmp/play.m3u
         fi
-        [[ -s "$tmp/play.m3u" ]] && playit $tmp/play.m3u
 
-        if [[ $? != -10 ]]; then
+        player_exit=
+        if [[ -s "$tmp/play.m3u" ]]; then
+            playit $tmp/play.m3u
+            player_exit=$?
+            pexit_flags $player_exit
+        fi
+
+        if [[ $player_exit != -10 ]]; then
           (( listen_time += $(date +%s) - before ))
           headline 3 "Time: $listen_time"
         else
