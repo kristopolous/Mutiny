@@ -72,6 +72,8 @@ _rm () { [[ -e "$1" ]] && rm "$1"; }
 _doc['_mkdir']="[ internal ]"
 _mkdir() { [[ -e "$1" ]] || mkdir -p "$1"; }
 
+_mkdir "$tmp"
+
 _doc['_tabs']="[ internal ]"
 _tabs() { tabs 2,+4,+2,+10; }
 
@@ -128,12 +130,6 @@ stop() { echo $(date +%s) > $STOPFILE; echo "Unstop by running $(basename $0) un
 
 _doc['unstop']="() Unblocks things from running"
 unstop() { rm $STOPFILE; echo "Unstopped"; }
-
-_mkdir "$tmp"
-if [[ ! -p "$tmp"/cmd_sock ]]; then
-  rm -f "$tmp"/cmd_sock 
-  mkfifo "$tmp"/cmd_sock
-fi
 
 _doc['prefs']="() Opens the prefs file in $EDITOR"
 prefs() {
@@ -720,9 +716,12 @@ load() {
   info "Loaded $size from $BACKUPDIR/playlist"
 }
 
-
 _doc['_repl']="[ internal ] The main REPL"
 _repl() {
+  if [[ ! -p "$tmp"/cmd_sock ]]; then
+    rm -f "$tmp"/cmd_sock 
+    mkfifo "$tmp"/cmd_sock
+  fi
   while [[ -z "$NOPROMPT" && -z "$skipprompt" ]]; do 
     echo -n "[$i] " 
     n=$( $DIR/magic-read.py "$tmp/cmd_sock"   )
