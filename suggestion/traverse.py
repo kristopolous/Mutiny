@@ -162,13 +162,31 @@ def traverse(source_release_ids, depth=2, max_pages_per_label=5, max_releases_pe
     
     print(f"\n=== TOTAL: {len(releases)} releases reachable ===", file=sys.stderr)
     
-    # Return all reachable releases
+    # Return all reachable releases with full data (no re-fetch needed)
     results = []
+    source_ids_set = set(source_release_ids)
+    
     for rid in releases:
+        # Find which depth this release was first discovered at
+        discovery_depth = 0
+        for d, rids in depth_results.items():
+            if rid in rids:
+                discovery_depth = d
+                break
+        
+        # Mark original source releases - compare as strings to handle type differences
+        is_source = str(rid) in source_ids_set
+        
         results.append({
             "release_id": rid,
             "title": releases[rid].get("title", "Unknown"),
-            "discogs_url": f"https://www.discogs.com/release/{rid}"
+            "discogs_url": f"https://www.discogs.com/release/{rid}",
+            "depth": discovery_depth,
+            "is_source": is_source,  # weight.py uses this to identify original sources
+            # Include full data so weight.py doesn't need to re-fetch
+            "contributors": [c["id"] for c in releases[rid].get("artists", [])],
+            "extraartists": [ea["id"] for ea in releases[rid].get("extraartists", [])],
+            "labels": [l["id"] for l in releases[rid].get("labels", [])],
         })
     
     return results
@@ -283,7 +301,13 @@ def main():
     print(f"Starting from {len(release_ids)} releases: {release_ids}", file=sys.stderr)
     
     results = traverse(release_ids, depth=args.depth)
-    print(json.dumps(results, indent=2))
+    
+    # Output with metadata for pipeline
+    output = {
+        "source_ids": release_ids,
+        "releases": results
+    }
+    print(json.dumps(output, indent=2))
 
 
 if __name__ == "__main__":
