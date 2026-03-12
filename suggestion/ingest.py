@@ -3,9 +3,37 @@ import math
 import requests
 from dotenv import load_dotenv
 import os
-from cache import cache_get, cache_set
+import time
+import logging
+from cache import cache_get, cache_set, get_redis_client
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# Rate limiting: be polite to Discogs - 30 requests/minute
+# 60s / 30 = 2 seconds between requests
+RATE_LIMIT_LOCK_EXPIRE = 2  # seconds
+
+
+def wait_for_rate_limit():
+    """
+    Simple Redis lock-based rate limiter.
+    Try to acquire a lock with short expiry. If fails, wait and retry.
+    """
+    client = get_redis_client()
+    lock_key = "discogs:rate_limit:lock"
+    
+    while True:
+        # Try to acquire lock (NX = only if not exists, EX = expiry seconds)
+        acquired = client.set(lock_key, "1", nx=True, ex=RATE_LIMIT_LOCK_EXPIRE)
+        
+        if acquired:
+            return  # Got the lock, proceed with request
+        
+        # Lock exists, wait and retry
+        logger.info(f"Rate limiting: waiting {RATE_LIMIT_LOCK_EXPIRE}s for lock")
+        time.sleep(RATE_LIMIT_LOCK_EXPIRE)
 
 DISCOGS_TOKEN = os.getenv("DISCOGS_USER_TOKEN")
 DISCOGS_USER_AGENT = os.getenv("DISCOGS_USER_AGENT", "MusicRecommender/1.0")
@@ -39,11 +67,13 @@ def safe_get(data, key, default=None):
     return data.get(key, default) if data else default
 
 def make_discogs_request(endpoint, max_retries=3):
-    import time
     cache_key = f"discogs:{endpoint}"
     cached = cache_get(cache_key)
     if cached:
         return cached
+    
+    # Wait for rate limit before making request
+    wait_for_rate_limit()
     
     headers = {
         "Authorization": f"Discogs token={DISCOGS_TOKEN}",
@@ -51,29 +81,32 @@ def make_discogs_request(endpoint, max_retries=3):
     }
     
     for attempt in range(max_retries):
-        response = requests.get(f"{DISCOGS_API_URL}/{endpoint}", headers=headers)
-        if response.status_code == 404:
-            return None
-        if response.status_code == 429:
-            if attempt < max_retries - 1:
-                wait_time = 2 ** attempt * 2
-                time.sleep(wait_time)
+        try:
+            response = requests.get(f"{DISCOGS_API_URL}/{endpoint}", headers=headers)
+            
+            if response.status_code == 404:
+                return None
+            if response.status_code == 429:
+                logger.warning(f"RATE LIMIT (429) on {endpoint} - attempt {attempt + 1}/{max_retries}")
+                wait_for_rate_limit()  # Wait and retry
                 continue
-            else:
-                raise requests.exceptions.HTTPError(f"Rate limited after {max_retries} attempts")
-        if response.status_code >= 500:
-            if attempt < max_retries - 1:
-                wait_time = 2 ** attempt * 2
-                time.sleep(wait_time)
+            if response.status_code >= 500:
+                logger.warning(f"SERVER ERROR {response.status_code} on {endpoint} - attempt {attempt + 1}/{max_retries}")
+                time.sleep(2 ** attempt)
                 continue
-            else:
-                raise requests.exceptions.HTTPError(f"Server error after {max_retries} attempts")
-        response.raise_for_status()
-        data = response.json()
-        
-        cache_set(cache_key, data, ttl=3600)
-        time.sleep(1)
-        return data
+                
+            response.raise_for_status()
+            data = response.json()
+            
+            cache_set(cache_key, data, ttl=604800)
+            return data
+            
+        except requests.exceptions.HTTPError as e:
+            logger.warning(f"HTTP error on {endpoint}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise
     
     return None
 
@@ -226,6 +259,64 @@ def get_or_create_producer(producer_id):
     )
     return {"discogs_id": producer_id, "name": name}
 
+def _ingest_artist_releases(artist_id, max_releases=50):
+    """
+    Fetch and ingest all releases for an artist.
+    Called when expanding contributors to populate the graph with their full discography.
+    """
+    releases_data = fetch_artist_releases(artist_id)
+    if not releases_data:
+        return
+    
+    for release in safe_get(releases_data, "releases", [])[:max_releases]:
+        release_id = str(safe_get(release, "id", ""))
+        if release_id:
+            # Only ingest the release node and its connections, not recursively expand
+            _ingest_single_release(release_id)
+
+def _ingest_single_release(release_id):
+    """Ingest just a release's metadata without expanding contributors."""
+    from graph import run_query
+    
+    release_data = fetch_release(release_id)
+    if not release_data:
+        return
+    
+    # Create release node
+    release = get_or_create_release(release_id)
+    if not release:
+        return
+    
+    # Get all contributors
+    all_contributors = set()
+    for artist_entry in safe_get(release_data, "artists", []):
+        aid = str(safe_get(artist_entry, "id", ""))
+        if aid:
+            all_contributors.add(aid)
+    for extraartist in safe_get(release_data, "extraartists", []):
+        aid = str(safe_get(extraartist, "id", ""))
+        if aid:
+            all_contributors.add(aid)
+    
+    # Create CONTRIBUTED_TO relationships
+    for aid in all_contributors:
+        run_query(
+            "MATCH (a:Artist {discogs_id: $aid}), (r:Release {discogs_id: $release_id}) MERGE (a)-[:CONTRIBUTED_TO]->(r)",
+            {"aid": aid, "release_id": release_id}
+        )
+    
+    # Process labels
+    for label in safe_get(release_data, "labels", []):
+        label_id = str(safe_get(label, "id", ""))
+        label_name = safe_get(label, "name", "")
+        if not label_id or label_name == "Not On Label":
+            continue
+        get_or_create_label(label_id)
+        run_query(
+            "MATCH (r:Release {discogs_id: $release_id}), (l:Label {discogs_id: $label_id}) MERGE (r)-[:RELEASED_ON]->(l)",
+            {"release_id": release_id, "label_id": label_id}
+        )
+
 def get_label_degree(label_id):
     from graph import run_query
     result = run_query(
@@ -242,7 +333,22 @@ def get_producer_degree(producer_id):
     )
     return result[0]["degree"] if result else 0
 
-def ingest_release_with_connections(release_id):
+# Role categories that should create contributor connections
+# These are "tastemakers" - people who make artistic decisions
+CONTRIBUTOR_ROLES = {
+    "Producer", "Mastered By", "Engineered By", "Mixed By",
+    "Artwork", "Design", "Photography", "Illustrator",
+    "Written By", "Composed By", "Lyrics By",
+    "Director", "Animator", "Video By"
+}
+
+def ingest_release_with_connections(release_id, expand_contributors=False):
+    """
+    Ingest a release and its connections into the graph.
+    
+    If expand_contributors=True, also ingest all releases for each contributor
+    so we can discover connections through them.
+    """
     from graph import run_query
     
     release_data = fetch_release(release_id)
@@ -262,12 +368,6 @@ def ingest_release_with_connections(release_id):
     if not release:
         return None
     
-    # Create CONTRIBUTED_TO relationship
-    run_query(
-        "MATCH (a:Artist {discogs_id: $artist_id}), (r:Release {discogs_id: $release_id}) MERGE (a)-[:CONTRIBUTED_TO]->(r)",
-        {"artist_id": artist_id, "release_id": release_id}
-    )
-    
     # Get all contributors (artists + extraartists)
     all_contributors = set()
     
@@ -281,10 +381,24 @@ def ingest_release_with_connections(release_id):
         if aid:
             all_contributors.add(aid)
     
+    # Create CONTRIBUTED_TO relationships for ALL contributors (primary + extraartists)
+    for aid in all_contributors:
+        run_query(
+            "MATCH (a:Artist {discogs_id: $aid}), (r:Release {discogs_id: $release_id}) MERGE (a)-[:CONTRIBUTED_TO]->(r)",
+            {"aid": aid, "release_id": release_id}
+        )
+    
     # Get or create all contributors
     for aid in all_contributors:
         if aid != artist_id:
             get_or_create_artist(aid)
+    
+    # If expand_contributors=True, fetch all releases for each contributor
+    # This populates the graph with their full discography for discovery
+    if expand_contributors:
+        for aid in all_contributors:
+            if aid != artist_id:  # Don't re-ingest the primary artist (already done via releases)
+                _ingest_artist_releases(aid)
     
     # Create SIMILAR relationships between all contributors (tastemakers)
     contributors_list = list(all_contributors)
@@ -300,18 +414,19 @@ def ingest_release_with_connections(release_id):
                     {"aid1": aid1, "aid2": aid2}
                 )
     
-    # Process labels
+    # Process labels - use higher threshold (5000) to capture more connections
+    # The degree filter is applied during query time in aggregate.py for scoring
     for label in safe_get(release_data, "labels", []):
         label_id = str(safe_get(label, "id", ""))
         label_name = safe_get(label, "name", "")
         
-        # Skip placeholder labels and high-degree labels
+        # Skip placeholder labels only
         if not label_id or label_name == "Not On Label":
             continue
         
         label_degree = get_label_degree(label_id)
-        if label_degree > 1000:
-            continue
+        # Don't skip high-degree labels during ingest - they're needed for the graph
+        # The degree filter for scoring is applied at query time
         
         label_obj = get_or_create_label(label_id)
         if label_obj:
@@ -321,23 +436,22 @@ def ingest_release_with_connections(release_id):
                 {"release_id": release_id, "label_id": label_id, "weight": weight}
             )
     
-    # Process producers
+    # Process all contributor roles (tastemakers)
     for extraartist in safe_get(release_data, "extraartists", []):
-        producer_id = str(safe_get(extraartist, "id", ""))
-        producer_roles = safe_get(extraartist, "role", "")
+        contributor_id = str(safe_get(extraartist, "id", ""))
+        contributor_name = safe_get(extraartist, "name", "")
+        contributor_role = safe_get(extraartist, "role", "")
         
-        if producer_id and "Producer" in producer_roles:
-            producer_degree = get_producer_degree(producer_id)
-            if producer_degree > 1000:
-                continue
-            
-            producer_obj = get_or_create_producer(producer_id)
-            if producer_obj:
-                weight = calculate_weight(producer_degree)
-                run_query(
-                    "MATCH (r:Release {discogs_id: $release_id}), (p:Producer {discogs_id: $producer_id}) MERGE (r)-[:PRODUCED_BY]->(p) ON CREATE SET r.weight = $weight",
-                    {"release_id": release_id, "producer_id": producer_id, "weight": weight}
-                )
+        if not contributor_id:
+            continue
+        
+        # Create the contributor as an Artist node
+        contributor = get_or_create_artist(contributor_id)
+        if not contributor:
+            continue
+        
+        # Each extraartist already added to all_contributors above and gets SIMILAR links
+        # No role parsing needed - every person with an ID is a tastemaker
     
     return release
 

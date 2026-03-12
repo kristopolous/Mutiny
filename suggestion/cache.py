@@ -17,6 +17,6 @@ def cache_get(key):
         return json.loads(value)
     return None
 
-def cache_set(key, value, ttl=3600):
+def cache_set(key, value, ttl=604800):  # 7 days in seconds
     client = get_redis_client()
     client.setex(key, ttl, json.dumps(value))
