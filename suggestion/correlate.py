@@ -6,6 +6,8 @@ import json
 import os
 import re
 import sys
+import config
+from config import logging
 from difflib import SequenceMatcher
 from html import unescape
 from cache import cache_get, cache_set, get_redis_client
