@@ -8,16 +8,15 @@ import re
 import sys
 from difflib import SequenceMatcher
 from html import unescape
+from cache import cache_get, cache_set, get_redis_client
 
 import discogs_client
 from dotenv import load_dotenv
 
 # Add parent directory to path to import cache module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cache import get_redis_client
 
 load_dotenv()
-
 
 def parse_description(content):
     """Parse the meta description tag content to extract release metadata."""
@@ -67,18 +66,20 @@ def parse_html(html_path):
 
 
 def search_discogs(client, parsed_data):
-    """Search Discogs API for matching release."""
+    """Search Discogs API for matcjhing release."""
     query_parts = {
         'artist': parsed_data['artist_name'],
         'type': 'release',
-        'release_title': parsed_data['release_name']
+        'release_title': re.sub(r' \wp$', "", parsed_data['release_name'].lower())
     }
 
-    if parsed_data.get('year'):
-        query_parts['year'] = parsed_data.get('year')
+    #if parsed_data.get('year'):
+    #    query_parts['year'] = parsed_data.get('year')
     
+    print(query_parts)
     try:
         results = client.search(**query_parts)
+        print(results.count)
         return results
     except Exception as e:
         print(f"Error searching Discogs: {e}", file=sys.stderr)
@@ -218,7 +219,12 @@ def correlate(html_path, client):
         if not hasattr(release, 'id'):
             continue
         
-        confidence, reasons = score_match(parsed_data, release)
+        try:
+            confidence, reasons = score_match(parsed_data, release)
+        except Exception as ex:
+            logging.warning(f"{ex}")
+            confidence, reasons = (0, "")
+            
         
         if confidence >= 0.5:
             matches.append({
@@ -296,9 +302,14 @@ def main():
             print("Error: DISCOGS_USER_TOKEN not set", file=sys.stderr)
             sys.exit(1)
         client = discogs_client.Client('Correlate/1.0', user_token=token)
-        matches = correlate(html_path, client)
+        if os.path.exists(html_path):
+            matches = correlate(html_path, client)
+        else:
+            logging.warning(f"{html_path} doesn't exist")
+            return
+
         if matches is None:
-            print("Failed to parse HTML file. Check that it contains a valid meta description.", file=sys.stderr)
+            print(f"Failed to parse {html_path}", file=sys.stderr)
             sys.exit(1)
         
         # Extract URL from best match (if any)
