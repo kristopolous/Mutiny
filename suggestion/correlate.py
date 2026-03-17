@@ -74,10 +74,10 @@ def search_discogs(client, parsed_data):
     
     print(query_parts)
     try:
-        time.sleep(max(0,time.time() - (_last_request + 3)))
+        time.sleep(8)
+        #time.sleep(max(0,time.time() - (_last_request + 3)))
         results = client.search(**query_parts)
         _last_request = time.time()
-        print(results.count)
         return results
     except Exception as e:
         print(f"Error searching Discogs: {e}", file=sys.stderr)
@@ -274,11 +274,13 @@ def main():
         if cached_url is not None:
             # Cache hit: decode bytes and output URL only
             url = cached_url.decode('utf-8') if isinstance(cached_url, bytes) else str(cached_url)
-            if args.json:
-                json.dump({"url": url}, args.output)
-            else:
-                args.output.write(url + '\n')
+            args.output.write(url + '\n')
             sys.exit(0)
+
+        if r.sismember('bc2fail', stub):
+            logging.info(f" ?? {stub}")
+            sys.exit(0)
+
         
         r.sadd('bc2fail', stub)
         token = args.token or os.getenv('DISCOGS_USER_TOKEN')
