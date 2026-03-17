@@ -61,10 +61,12 @@ def search_discogs(client, parsed_data):
     """Search Discogs API for matcjhing release."""
     global _last_request
 
+    ttl = unescape(parsed_data['release_name'].lower())
+    ttl = re.sub(r'^\[[^\]]*]\s+','', ttl)
     query_parts = {
-        'artist': parsed_data['artist_name'],
+        'artist': unescape(parsed_data['artist_name']),
         'type': 'release',
-        'release_title': ' '.join(parsed_data['release_name'].lower().split(' ')[:2])
+        'release_title': ' '.join(ttl.split(' ')[:2])
     }
 
     #if parsed_data.get('year'):
@@ -176,13 +178,6 @@ def resolve_html_path(path):
     raise ValueError(f"Path does not exist: {path}")
 
 
-def get_cache_key(html_path):
-    """Generate a cache key based on the resolved file path."""
-    # Use absolute normalized path as cache key - it's unique and debuggable
-    abs_path = '/'.join(os.path.abspath(html_path).split('/')[-3:-1])
-    return f"bc2:{abs_path}"
-
-
 def get_discogs_data(release):
     """Extract relevant data from a Discogs release object."""
     data = {
@@ -273,27 +268,21 @@ def main():
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
         
-        cache_key = get_cache_key(html_path)
+        stub = '/'.join(os.path.abspath(html_path).split('/')[-3:-1])
         r = get_redis_client()
-        cached_url = r.get(cache_key)
+        cached_url = r.hget('bc2dg', stub)
         if cached_url is not None:
             # Cache hit: decode bytes and output URL only
             url = cached_url.decode('utf-8') if isinstance(cached_url, bytes) else str(cached_url)
-            if url:  # Non-empty means we have a match
-                if args.json:
-                    json.dump({"url": url}, args.output)
-                else:
-                    args.output.write(url + '\n')
-                sys.exit(0)
-            else:  # Empty cached value means previous attempt found no match
-                print(f"No matches found (cached) for {cache_key}", file=sys.stderr)
-                sys.exit(1)
+            if args.json:
+                json.dump({"url": url}, args.output)
+            else:
+                args.output.write(url + '\n')
+            sys.exit(0)
         
-        # Cache miss: need to call Discogs API
+        r.sadd('bc2fail', stub)
         token = args.token or os.getenv('DISCOGS_USER_TOKEN')
-        if not token:
-            print("Error: DISCOGS_USER_TOKEN not set", file=sys.stderr)
-            sys.exit(1)
+
         if os.path.exists(html_path):
             with open(html_path, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -309,7 +298,6 @@ def main():
             if not parsed_data:
                 print(match.group(1))
                 sys.exit(1)
-
 
     
             client = discogs_client.Client('Correlate/1.0', user_token=token)
@@ -333,8 +321,11 @@ def main():
         
         try:
             if len(url):
-                r.set(cache_key, url)
-        except Exception:
+                r.srem('bc2fail', stub)
+                r.hset("bc2dg", stub, url)
+        except Exception as ex:
+            print(ex)
+
             pass
         
         if not matches:
@@ -342,9 +333,9 @@ def main():
             if parsed_data:
                 artist = parsed_data.get('artist_name', 'unknown')
                 release = parsed_data.get('release_name', 'unknown')
-                print(f"No matches found for {artist} - {release} ({cache_key})", file=sys.stderr)
+                print(f"No matches found for {artist} - {release} ({stub})", file=sys.stderr)
             else:
-                print(f"No matches found for {cache_key}", file=sys.stderr)
+                print(f"No matches found for {stub}", file=sys.stderr)
             sys.exit(1)
         
         # Output full match information
@@ -353,20 +344,16 @@ def main():
         else:
             for match in matches:
                 args.output.write(match['source_file'])
-                args.output.write(f"Artist: {match['parsed_data']['artist_name']}\n")
-                args.output.write(f"Release: {match['parsed_data']['release_name']}\n")
-                args.output.write(f"Discogs: {match['discogs_release']['title']} (ID: {match['discogs_release']['id']})\n")
-                # Show this match's URL
+                args.output.write(f"\n {match['parsed_data']['artist_name']}\n")
+                args.output.write(f"R: {match['parsed_data']['release_name']}\n")
+                args.output.write(f"D: {match['discogs_release']['title']} (ID: {match['discogs_release']['id']})\n")
                 match_url = match['discogs_release'].get('uri')
                 if not match_url and match['discogs_release'].get('id'):
                     match_url = f"https://www.discogs.com/release/{match['discogs_release']['id']}"
-                if match_url:
-                    args.output.write(f"URL: {match_url}\n")
                 args.output.write(f"Confidence: {match['confidence']:.2%}\n")
                 if match['match_reasons']:
-                    args.output.write("Reasons:\n")
                     for reason in match['match_reasons']:
-                        args.output.write(f"  - {reason}\n")
+                        args.output.write(f"- {reason}\n")
     
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
