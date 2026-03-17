@@ -1,0 +1,3 @@
+redis
+dotenv
+discogs_client
