@@ -2,6 +2,7 @@
 """Correlate Bandcamp releases with Discogs."""
 
 import argparse
+import time
 import json
 import os
 import re
@@ -24,13 +25,12 @@ def parse_description(content):
     """Parse the meta description tag content to extract release metadata."""
     content = unescape(content.strip())
     lines = content.split('\n')
-    
     if not lines:
         return None
     
     first_line = lines[0].strip()
     
-    match = re.match(r'(.+?)\s+by\s+(.+?),\s+released\s+(.+)', first_line)
+    match = re.match(r'(.+?)\s+by\s+(.+?),\s+release[sd]\s+(.+)', first_line)
     if match:
         release_name = match.group(1).strip()
         artist_name = match.group(2).strip()
@@ -55,24 +55,16 @@ def parse_description(content):
     return None
 
 
-def parse_html(html_path):
-    """Parse a page.html file and extract metadata from meta description."""
-    with open(html_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    match = re.search(r'<meta\s+name="description"\s+content="([^"]*)"', content, re.IGNORECASE)
-    if match:
-        return parse_description(match.group(1))
-    
-    return None
-
+_last_request = time.time()
 
 def search_discogs(client, parsed_data):
     """Search Discogs API for matcjhing release."""
+    global _last_request
+
     query_parts = {
         'artist': parsed_data['artist_name'],
         'type': 'release',
-        'release_title': re.sub(r' \wp$', "", parsed_data['release_name'].lower())
+        'release_title': ' '.join(parsed_data['release_name'].lower().split(' ')[:2])
     }
 
     #if parsed_data.get('year'):
@@ -80,7 +72,9 @@ def search_discogs(client, parsed_data):
     
     print(query_parts)
     try:
+        time.sleep(max(0,time.time() - (_last_request + 3)))
         results = client.search(**query_parts)
+        _last_request = time.time()
         print(results.count)
         return results
     except Exception as e:
@@ -177,7 +171,7 @@ def resolve_html_path(path):
         if os.path.isfile(page_html):
             return page_html
         else:
-            raise ValueError(f"No page.html found in directory: {path}")
+            raise ValueError(f"No page.html found: {path}")
     
     raise ValueError(f"Path does not exist: {path}")
 
@@ -208,12 +202,8 @@ def get_discogs_data(release):
     return data
 
 
-def correlate(html_path, client):
+def correlate(parsed_data, html_path, client):
     """Main correlation function."""
-    parsed_data = parse_html(html_path)
-    if not parsed_data:
-        return None
-    
     results = search_discogs(client, parsed_data)
     
     matches = []
@@ -270,6 +260,7 @@ def main():
     args = parser.parse_args()
     
     try:
+        parsed_data = None
         # Reject URL inputs
         if args.input.startswith('http'):
             print("URL input not supported. Provide a path to a page.html file or its containing directory.", file=sys.stderr)
@@ -303,15 +294,32 @@ def main():
         if not token:
             print("Error: DISCOGS_USER_TOKEN not set", file=sys.stderr)
             sys.exit(1)
-        client = discogs_client.Client('Correlate/1.0', user_token=token)
         if os.path.exists(html_path):
-            matches = correlate(html_path, client)
+            with open(html_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+    
+            match = re.search(r'<meta\s+name="description"\s+content="([^"]*)"', content, re.IGNORECASE)
+            if match:
+                parsed_data = parse_description(match.group(1))
+
+            else:
+                if "Sorry, that something isn’t here" not in content:
+                    logging.warning(f" !! {html_path}")
+                sys.exit(1)
+            if not parsed_data:
+                print(match.group(1))
+                sys.exit(1)
+
+
+    
+            client = discogs_client.Client('Correlate/1.0', user_token=token)
+            matches = correlate(parsed_data, html_path, client)
         else:
             logging.warning(f"{html_path} doesn't exist")
             return
 
         if matches is None:
-            print(f"Failed to parse {html_path}", file=sys.stderr)
+            logging.warning(f" !! {html_path}")
             sys.exit(1)
         
         # Extract URL from best match (if any)
@@ -323,18 +331,17 @@ def main():
         else:
             url = ''
         
-        # Cache the URL (avoid repeated lookups)
         try:
-            r.setex(cache_key, 3600, url)
+            if len(url):
+                r.set(cache_key, url)
         except Exception:
             pass
         
         if not matches:
             # No matches: show helpful error with artist/release info
-            parsed = parse_html(html_path)
-            if parsed:
-                artist = parsed.get('artist_name', 'unknown')
-                release = parsed.get('release_name', 'unknown')
+            if parsed_data:
+                artist = parsed_data.get('artist_name', 'unknown')
+                release = parsed_data.get('release_name', 'unknown')
                 print(f"No matches found for {artist} - {release} ({cache_key})", file=sys.stderr)
             else:
                 print(f"No matches found for {cache_key}", file=sys.stderr)
@@ -345,8 +352,7 @@ def main():
             json.dump(matches, args.output, indent=2)
         else:
             for match in matches:
-                args.output.write(f"\n{'='*60}\n")
-                args.output.write(f"Source: {match['source_file']}\n")
+                args.output.write(match['source_file'])
                 args.output.write(f"Artist: {match['parsed_data']['artist_name']}\n")
                 args.output.write(f"Release: {match['parsed_data']['release_name']}\n")
                 args.output.write(f"Discogs: {match['discogs_release']['title']} (ID: {match['discogs_release']['id']})\n")
