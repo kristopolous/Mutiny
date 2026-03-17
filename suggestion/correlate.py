@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Correlate Bandcamp releases with Discogs."""
 
 import argparse
 import time
@@ -12,8 +11,6 @@ from config import logging
 from difflib import SequenceMatcher
 from html import unescape
 from cache import cache_get, cache_set, get_redis_client
-
-import discogs_client
 from dotenv import load_dotenv
 
 # Add parent directory to path to import cache module
@@ -302,6 +299,7 @@ def main():
                 sys.exit(1)
 
     
+            import discogs_client
             client = discogs_client.Client('Correlate/1.0', user_token=token)
             matches = correlate(parsed_data, html_path, client)
         else:
