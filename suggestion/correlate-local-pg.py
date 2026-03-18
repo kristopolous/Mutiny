@@ -257,6 +257,18 @@ def process_path(conn, path, json_output=False):
         return url
 
 
+def check_schema(conn):
+    """Verify expected tables exist."""
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT EXISTS (SELECT FROM information_schema.tables 
+                       WHERE table_name = 'releases')
+    ''')
+    if not cursor.fetchone()[0]:
+        print("Error: Database schema not found. Run discogs-xml-to-pg.py first.", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Match Bandcamp releases to Discogs using a local PostgreSQL database.'
@@ -284,6 +296,7 @@ def main():
         sys.exit(1)
     
     conn = psycopg2.connect(args.db)
+    check_schema(conn)
     
     count = 0
     matched = 0
