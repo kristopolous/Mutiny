@@ -345,13 +345,13 @@ def parse_xml_file(xml_path, db_url, batch_size=50000):
                 
                 if release_artists_buf:
                     execute_batch(cursor,
-                        "INSERT INTO release_artists (release_id, artist_id, join_text, anv) VALUES (%s, %s, %s, %s)",
+                        "INSERT INTO release_artists (release_id, artist_id, join_text, anv) VALUES (%s, %s, %s, %s) ON CONFLICT (release_id, artist_id) DO NOTHING",
                         release_artists_buf)
                     release_artists_buf = []
                 
                 if release_extraartists_buf:
                     execute_batch(cursor,
-                        "INSERT INTO release_extraartists (release_id, artist_id, role, anv) VALUES (%s, %s, %s, %s)",
+                        "INSERT INTO release_extraartists (release_id, artist_id, role, anv) VALUES (%s, %s, %s, %s) ON CONFLICT (release_id, artist_id) DO NOTHING",
                         release_extraartists_buf)
                     release_extraartists_buf = []
                 
@@ -363,7 +363,7 @@ def parse_xml_file(xml_path, db_url, batch_size=50000):
                 
                 if track_artists_buf:
                     execute_batch(cursor,
-                        "INSERT INTO track_artists (track_id, artist_id, role, anv) VALUES (%s, %s, %s, %s)",
+                        "INSERT INTO track_artists (track_id, artist_id, role, anv) VALUES (%s, %s, %s, %s) ON CONFLICT (track_id, artist_id) DO NOTHING",
                         track_artists_buf)
                     track_artists_buf = []
                 
@@ -381,11 +381,11 @@ def parse_xml_file(xml_path, db_url, batch_size=50000):
             releases_buf)
     if release_artists_buf:
         execute_batch(cursor,
-            "INSERT INTO release_artists (release_id, artist_id, join_text, anv) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO release_artists (release_id, artist_id, join_text, anv) VALUES (%s, %s, %s, %s) ON CONFLICT (release_id, artist_id) DO NOTHING",
             release_artists_buf)
     if release_extraartists_buf:
         execute_batch(cursor,
-            "INSERT INTO release_extraartists (release_id, artist_id, role, anv) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO release_extraartists (release_id, artist_id, role, anv) VALUES (%s, %s, %s, %s) ON CONFLICT (release_id, artist_id) DO NOTHING",
             release_extraartists_buf)
     if tracks_buf:
         execute_batch(cursor,
@@ -393,7 +393,7 @@ def parse_xml_file(xml_path, db_url, batch_size=50000):
             tracks_buf)
     if track_artists_buf:
         execute_batch(cursor,
-            "INSERT INTO track_artists (track_id, artist_id, role, anv) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO track_artists (track_id, artist_id, role, anv) VALUES (%s, %s, %s, %s) ON CONFLICT (track_id, artist_id) DO NOTHING",
             track_artists_buf)
     
     conn.commit()
