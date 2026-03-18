@@ -71,7 +71,7 @@ def search_discogs(client, parsed_data):
     
     print(query_parts)
     try:
-        time.sleep(8)
+        time.sleep(9)
         #time.sleep(max(0,time.time() - (_last_request + 3)))
         results = client.search(**query_parts)
         _last_request = time.time()
