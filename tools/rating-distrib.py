@@ -17,6 +17,7 @@ with open('.listen_all', 'r') as f:
 
     labelTotal[label] = (labelTotal.get(label) or 0) + 1
 
+
 with open('.listen_done', 'r') as f:
   for line in f.readlines():
     parts = line.split(' ')
@@ -67,15 +68,17 @@ for row in fracSort:
   perc = percFloat = 0
   if labelTotal.get(row['label']):
     percFloat = row['total'] / labelTotal.get(row['label'])
-    perc = int(10 * percFloat)
+    perc = min(1, int(10 * percFloat))
 
 
+  """
   if os.path.exists(row['label']):
     if os.path.isfile("{}/no".format(row['label'])):
       continue
-    sz = os.popen("du -sm {}".format(row['label'])).read().split('\t')[0]
+    # sz = os.popen("du -sm {}".format(row['label'])).read().split('\t')[0]
   else:
     continue
+  """
 
   cnt += 1
   rev = '' if cnt % 3 else chr(27) + '[4m'
@@ -88,6 +91,5 @@ for row in fracSort:
       row['total'], 
       chr(9642) * perc, 
       chr(903) * (10-perc), 
-      100*percFloat, 
-      sz
+      100*percFloat, 0 #, sz
     ), reset)
