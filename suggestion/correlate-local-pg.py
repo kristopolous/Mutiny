@@ -2,10 +2,10 @@
 """
 Match Bandcamp releases to Discogs using a local PostgreSQL database.
 
-Reads paths from stdin, outputs Discogs URLs to stdout.
+Reads paths from stdin, caches results in Redis (same as correlate.py).
 
 Usage:
-    find <bandcamp-dir> -name page.html | python correlate-local-pg.py --db postgresql://... [-j]
+    find <bandcamp-dir> -name page.html | python correlate-local-pg.py --db postgresql://... [-v]
 """
 
 import argparse
@@ -14,8 +14,14 @@ import os
 import re
 import sys
 import psycopg2
+import redis
 from html import unescape
 from difflib import SequenceMatcher
+
+
+def get_redis_client():
+    """Get Redis client."""
+    return redis.Redis(decode_responses=False)
 
 
 def calculate_similarity(a, b):
@@ -214,8 +220,8 @@ def correlate_local(conn, parsed_data, html_path):
     return matches
 
 
-def process_path(conn, path, json_output=False):
-    """Process a single path and output results."""
+def process_path(conn, redis_client, path, verbose=False):
+    """Process a single path, check cache, update Redis."""
     html_path = resolve_html_path(path)
     
     if not html_path or not os.path.exists(html_path):
@@ -223,65 +229,77 @@ def process_path(conn, path, json_output=False):
     
     stub = '/'.join(os.path.abspath(html_path).split('/')[-3:-1])
     
+    # Check Redis cache first
+    cached_url = redis_client.hget('bc2dg', stub)
+    if cached_url is not None:
+        url = cached_url.decode('utf-8') if isinstance(cached_url, bytes) else str(cached_url)
+        if verbose:
+            print(f"[CACHE] {stub} -> {url}", file=sys.stderr)
+        return url
+    
+    # Check if previously failed
+    if redis_client.sismember('bc2fail', stub):
+        if verbose:
+            print(f"[FAIL] {stub} (cached failure)", file=sys.stderr)
+        return None
+    
+    # Parse page.html
     try:
         with open(html_path, 'r', encoding='utf-8') as f:
             content = f.read()
     except Exception as e:
-        print(f"Error reading {html_path}: {e}", file=sys.stderr)
+        if verbose:
+            print(f"[ERROR] {html_path}: {e}", file=sys.stderr)
         return None
     
     match = re.search(r'<meta\s+name="description"\s+content="([^"]*)"', content, re.IGNORECASE)
     if not match:
+        if "Sorry, that something isn't here" not in content:
+            if verbose:
+                print(f"[NOMATCH] {stub} (no meta description)", file=sys.stderr)
         return None
     
     parsed_data = parse_description(match.group(1))
     if not parsed_data:
+        if verbose:
+            print(f"[PARSE] {stub} (parse failed)", file=sys.stderr)
         return None
     
+    # Search and score
     matches = correlate_local(conn, parsed_data, html_path)
     
     if not matches:
+        # Cache the failure
+        redis_client.sadd('bc2fail', stub)
+        if verbose:
+            artist = parsed_data.get('artist_name', 'unknown')
+            release = parsed_data.get('release_name', 'unknown')
+            print(f"[NOMATCH] {artist} - {release} ({stub})", file=sys.stderr)
         return None
     
+    # Store success in Redis
     best = matches[0]
     release_id = best['discogs_release']['id']
     url = f"https://www.discogs.com/release/{release_id}"
     
-    if json_output:
-        return {
-            'stub': stub,
-            'url': url,
-            'match': best
-        }
-    else:
-        return url
-
-
-def check_schema(conn):
-    """Verify expected tables exist."""
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT EXISTS (SELECT FROM information_schema.tables 
-                       WHERE table_name = 'releases')
-    ''')
-    if not cursor.fetchone()[0]:
-        print("Error: Database schema not found. Run discogs-xml-to-pg.py first.", file=sys.stderr)
-        sys.exit(1)
+    redis_client.srem('bc2fail', stub)
+    redis_client.hset('bc2dg', stub, url)
+    
+    if verbose:
+        print(f"[FOUND] {stub} -> {url} ({best['confidence']:.0%})", file=sys.stderr)
+    
+    return url
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Match Bandcamp releases to Discogs using a local PostgreSQL database.'
+        description='Match Bandcamp releases to Discogs using a local PostgreSQL database. '
+                    'Results are cached in Redis (same as correlate.py).'
     )
     parser.add_argument(
         '--db', '-d',
         default=os.environ.get('DATABASE_URL'),
         help='PostgreSQL connection URL (default: $DATABASE_URL)'
-    )
-    parser.add_argument(
-        '-j', '--json',
-        action='store_true',
-        help='Output matches in JSON format'
     )
     parser.add_argument(
         '-v', '--verbose',
@@ -295,12 +313,16 @@ def main():
         print("Error: No database specified. Use --db or set DATABASE_URL", file=sys.stderr)
         sys.exit(1)
     
+    # Connect to PostgreSQL
     conn = psycopg2.connect(args.db)
-    check_schema(conn)
+    
+    # Connect to Redis
+    redis_client = get_redis_client()
     
     count = 0
     matched = 0
     failed = 0
+    cached = 0
     
     try:
         for line in sys.stdin:
@@ -309,21 +331,14 @@ def main():
                 continue
             
             count += 1
-            if args.verbose:
-                print(f"[{count}] Processing: {path}", file=sys.stderr)
             
-            result = process_path(conn, path, args.json)
+            result = process_path(conn, redis_client, path, args.verbose)
             
             if result:
                 matched += 1
-                if not args.json:
-                    print(result)
-                else:
-                    print(json.dumps(result))
+                print(result)
             else:
                 failed += 1
-                if args.verbose:
-                    print(f"  -> No match", file=sys.stderr)
     
     except KeyboardInterrupt:
         print(f"\nInterrupted after {count} paths.", file=sys.stderr)
