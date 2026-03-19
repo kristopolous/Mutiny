@@ -87,7 +87,7 @@ def search_discogs_local(conn, parsed_data, limit=100):
     skip_words = {'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'for', 'to', 'at', 'by', 'with'}
     title_words = [w for w in release_name.lower().split() if w not in skip_words and len(w) > 2]
     
-    # Search using release_artists table
+    # Use trigram index for fast artist search, then join to releases
     query = '''
         SELECT DISTINCT r.id, r.title, r.released, r.year,
                (SELECT array_agg(a.name) FROM release_artists ra
@@ -95,9 +95,9 @@ def search_discogs_local(conn, parsed_data, limit=100):
         FROM releases r
         JOIN release_artists ra ON r.id = ra.release_id
         JOIN artists a ON a.id = ra.artist_id
-        WHERE a.name ILIKE %s
+        WHERE a.name %>%s
     '''
-    params = [f'%{artist_name}%']
+    params = [artist_name]
     
     # Add title conditions
     if title_words:

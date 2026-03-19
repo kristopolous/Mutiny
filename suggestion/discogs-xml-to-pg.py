@@ -125,11 +125,16 @@ def create_indexes(conn):
     cursor = conn.cursor()
     print("Creating indexes...")
     
+    # Enable trigram extension for fast substring searches
+    cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    
     indexes = [
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_releases_title ON releases(title)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_releases_year ON releases(year)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_releases_released ON releases(released)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_artists_name ON artists(name)",
+        # Trigram index for fast artist name substring search
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_artists_name_trgm ON artists USING GIN (name gin_trgm_ops)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_release_artists_artist ON release_artists(artist_id)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_release_artists_release ON release_artists(release_id)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_release_extraartists_artist ON release_extraartists(artist_id)",
