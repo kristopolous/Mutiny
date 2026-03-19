@@ -52,13 +52,33 @@ python correlate.py https://artist.bandcamp.com/album/release-name
 
 ## Architecture
 
-- `aggregate.py` - Main recommender with Adamic-Adar + Jaccard + Label IDF scoring
-- `traverse.py` - BFS graph traversal
-- `weight.py` - IDF weighting for features
+**PostgreSQL Import (fast, no rate limits):**
+- `discogs-xml-to-pg.py` - Import 45GB Discogs XML dump into PostgreSQL (~5 hours for 18M releases)
+- `correlate-local-pg.py` - Match Bandcamp pages to Discogs using local PostgreSQL (sub-second per release)
+
+**Legacy SQLite approach:**
+- `discogs-xml-to-db.py` - Import Discogs XML into SQLite (too slow for large datasets)
+- `correlate-local.py` - Match Bandcamp pages using local SQLite
+
+**Discogs API-based (rate-limited, ~9s per request):**
+- `correlate.py` - Match Bandcamp pages to Discogs API with Redis caching
+
+**Graph-based recommendation (Neo4j):**
+- `aggregate.py` - Main recommender with Adamic-Adar + Jaccard + IDF scoring
+- `traverse_and_weight.py` - Combined BFS traversal and IDF weighting
+- `traverse.py` - BFS graph traversal from seed releases
+- `weight.py` - IDF weighting for graph features
+- `similar.py` - Find similar releases for a single Discogs URL
 - `ingest.py` - Discogs API client + Neo4j ingestion
 - `graph.py` - Neo4j query interface
-- `cache.py` - Redis caching for API responses
-- `config.py` - Environment configuration
+- `rank_feature.py` - Feature ranking utilities
+
+**Supporting:**
+- `cache.py` - Redis caching for API responses and correlations
+- `config.py` - Environment configuration and logging
+- `lib.py` - Shared utility functions
+- `install_deps.sh` - Install Python dependencies
+- `start_servers.sh` - Start Neo4j and Redis servers
 
 ## Depth Levels
 
