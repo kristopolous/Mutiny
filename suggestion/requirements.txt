@@ -1,3 +1,4 @@
 redis
 dotenv
 discogs_client
+psycopg2-binary
