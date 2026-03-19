@@ -135,7 +135,6 @@ def create_indexes(conn):
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_release_extraartists_artist ON release_extraartists(artist_id)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_release_extraartists_release ON release_extraartists(release_id)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracks_release ON tracks(release_id)",
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracks_title ON tracks(title)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_track_artists_artist ON track_artists(artist_id)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_track_artists_track ON track_artists(track_id)",
     ]
