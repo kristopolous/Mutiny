@@ -25,6 +25,22 @@ def create_schema(conn):
     """Create schema optimized for network queries."""
     cursor = conn.cursor()
     
+    # Check if already imported (re-entrancy check)
+    cursor.execute("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_name = 'releases'
+        )
+    """)
+    if cursor.fetchone()[0]:
+        cursor.execute("SELECT COUNT(*) FROM releases")
+        count = cursor.fetchone()[0]
+        if count > 1000000:
+            print(f"Database already populated ({count} releases). Skipping import.")
+            return False
+        else:
+            print(f"Found existing partial import ({count} releases). Recreating schema...")
+    
     cursor.execute('DROP TABLE IF EXISTS releases')
     cursor.execute('DROP TABLE IF EXISTS artists')
     cursor.execute('DROP TABLE IF EXISTS track_artists')
@@ -120,10 +136,13 @@ def create_indexes(conn):
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_track_artists_track ON track_artists(track_id)",
     ]
     
+    # CREATE INDEX CONCURRENTLY cannot run in a transaction
+    conn.set_session(autocommit=True)
+    
     for idx_sql in indexes:
         cursor.execute(idx_sql)
-        conn.commit()
     
+    conn.set_session(autocommit=False)
     print("Indexes created.")
 
 
@@ -241,7 +260,15 @@ def parse_xml_file(xml_path, db_url, batch_size=50000):
     conn = psycopg2.connect(db_url)
     cursor = conn.cursor()
     
-    create_schema(conn)
+    if not create_schema(conn):
+        # Already populated, just ensure indexes exist
+        create_indexes(conn)
+        cursor.execute("SELECT COUNT(*) FROM releases")
+        count = cursor.fetchone()[0]
+        print(f"\nDatabase ready!")
+        print(f"  Total releases: {count}")
+        conn.close()
+        return
     
     # Buffers
     artists_buf = []
