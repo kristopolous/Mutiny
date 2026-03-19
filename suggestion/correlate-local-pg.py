@@ -234,13 +234,13 @@ def process_path(conn, redis_client, path, verbose=False):
     if cached_url is not None:
         url = cached_url.decode('utf-8') if isinstance(cached_url, bytes) else str(cached_url)
         if verbose:
-            print(f"[CACHE] {stub} -> {url}", file=sys.stderr)
+            print(f"[CACHE HIT] {stub} -> {url}", file=sys.stderr)
         return url
     
     # Check if previously failed
     if redis_client.sismember('bc2fail', stub):
         if verbose:
-            print(f"[FAIL] {stub} (cached failure)", file=sys.stderr)
+            print(f"[CACHED FAIL] {stub}", file=sys.stderr)
         return None
     
     # Parse page.html
@@ -249,20 +249,20 @@ def process_path(conn, redis_client, path, verbose=False):
             content = f.read()
     except Exception as e:
         if verbose:
-            print(f"[ERROR] {html_path}: {e}", file=sys.stderr)
+            print(f"[ERROR] {stub}: {e}", file=sys.stderr)
         return None
     
     match = re.search(r'<meta\s+name="description"\s+content="([^"]*)"', content, re.IGNORECASE)
     if not match:
         if "Sorry, that something isn't here" not in content:
             if verbose:
-                print(f"[NOMATCH] {stub} (no meta description)", file=sys.stderr)
+                print(f"[NO META] {stub}", file=sys.stderr)
         return None
     
     parsed_data = parse_description(match.group(1))
     if not parsed_data:
         if verbose:
-            print(f"[PARSE] {stub} (parse failed)", file=sys.stderr)
+            print(f"[PARSE FAIL] {stub}", file=sys.stderr)
         return None
     
     # Search and score
@@ -274,7 +274,7 @@ def process_path(conn, redis_client, path, verbose=False):
         if verbose:
             artist = parsed_data.get('artist_name', 'unknown')
             release = parsed_data.get('release_name', 'unknown')
-            print(f"[NOMATCH] {artist} - {release} ({stub})", file=sys.stderr)
+            print(f"[NO MATCH] {stub} ({artist} - {release})", file=sys.stderr)
         return None
     
     # Store success in Redis
