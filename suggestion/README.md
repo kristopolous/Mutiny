@@ -30,9 +30,17 @@ source .venv/bin/activate
 
 ## Usage
 
-**Aggregate recommendations from multiple releases:**
+**Full pipeline (recommended):**
 ```bash
-./aggregate.py -f releases.txt -n 20 -d 2
+# Create preferences file
+cat > prefs.txt << EOF
+label/release-love 5
+label/release-ok 2
+label/release-dont-like 0
+EOF
+
+# Run pipeline: correlate → traverse → weight → rank
+./pipeline.py -f prefs.txt -d 2 -n 20
 ```
 
 **Traverse and weight releases:**
