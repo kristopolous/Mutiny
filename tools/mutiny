@@ -272,9 +272,9 @@ while [[ ${#all[@]} -gt $ix ]]; do
                 stat . > /dev/null || cd $PWD
 
                 # if it exited naturally we send an audio indicator
-                breaker
                 ;;
             esac
+            breaker
 
             (( listen_time += $(date +%s) - before ))
             [[ -z "$NOSCORE" ]] && headline 3 "Time: $(TZ=UTC date -d@$listen_time +%T)\n"
