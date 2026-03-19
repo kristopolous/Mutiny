@@ -118,6 +118,10 @@ def create_schema(conn):
 
 def create_indexes(conn):
     """Create indexes after data loading."""
+    # Must close any existing transaction first
+    conn.commit()
+    conn.set_session(autocommit=True)
+    
     cursor = conn.cursor()
     print("Creating indexes...")
     
@@ -135,9 +139,6 @@ def create_indexes(conn):
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_track_artists_artist ON track_artists(artist_id)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_track_artists_track ON track_artists(track_id)",
     ]
-    
-    # CREATE INDEX CONCURRENTLY cannot run in a transaction
-    conn.set_session(autocommit=True)
     
     for idx_sql in indexes:
         cursor.execute(idx_sql)
