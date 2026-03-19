@@ -95,9 +95,9 @@ def search_discogs_local(conn, parsed_data, limit=100):
         FROM releases r
         JOIN release_artists ra ON r.id = ra.release_id
         JOIN artists a ON a.id = ra.artist_id
-        WHERE a.name %>%s
+        WHERE a.name ILIKE %s
     '''
-    params = [artist_name]
+    params = [f'%{artist_name}%']
     
     # Add title conditions
     if title_words:
