@@ -40,51 +40,57 @@ label/release-dont-like 0
 EOF
 
 # Run pipeline: correlate → traverse → weight → rank
-./pipeline.py -f prefs.txt -d 2 -n 20
+./pipeline/pipeline.py -f prefs.txt -d 2 -n 20
 ```
 
-**Traverse and weight releases:**
+**Step-by-step:**
+
+1. Import Discogs XML dump (one-time, ~5 hours):
 ```bash
-./traverse_and_weight.py -f releases.txt -d 2
+./local/discogs-xml-to-pg.py discogs.xml --db $DATABASE_URL
 ```
 
-**Find similar releases for a single artist/release:**
+2. Correlate Bandcamp pages to Discogs IDs:
 ```bash
-./similar.py https://www.discogs.com/release/12345
+find <bandcamp-dir> -name page.html | ./local/correlate-local-pg.py --db $DATABASE_URL -v
 ```
 
-**Correlate Bandcamp URL to Discogs:**
+3. Traverse and weight from seed releases:
 ```bash
-python correlate.py https://artist.bandcamp.com/album/release-name
+./pipeline/traverse_and_weight.py -f releases.txt -d 2
+```
+
+4. Find similar releases for a single Discogs URL:
+```bash
+./pipeline/similar.py https://www.discogs.com/release/12345
 ```
 
 ## Architecture
 
-**PostgreSQL Import (fast, no rate limits):**
+**local/** - Local database import and correlation (no API rate limits):
 - `discogs-xml-to-pg.py` - Import 45GB Discogs XML dump into PostgreSQL (~5 hours for 18M releases)
 - `correlate-local-pg.py` - Match Bandcamp pages to Discogs using local PostgreSQL (sub-second per release)
+- `discogs-xml-to-db.py` - Import Discogs XML into SQLite (legacy, too slow for large datasets)
+- `correlate-local.py` - Match Bandcamp pages using local SQLite (legacy)
 
-**Legacy SQLite approach:**
-- `discogs-xml-to-db.py` - Import Discogs XML into SQLite (too slow for large datasets)
-- `correlate-local.py` - Match Bandcamp pages using local SQLite
+**correlate/** - API-based correlation:
+- `correlate.py` - Match Bandcamp pages to Discogs API with Redis caching (~9s per request)
 
-**Discogs API-based (rate-limited, ~9s per request):**
-- `correlate.py` - Match Bandcamp pages to Discogs API with Redis caching
-
-**Graph-based recommendation (Neo4j):**
-- `aggregate.py` - Main recommender with Adamic-Adar + Jaccard + IDF scoring
+**pipeline/** - Recommendation pipeline:
+- `pipeline.py` - Full pipeline: preferences → correlate → traverse → weight → rank
+- `aggregate.py` - Multi-release recommender with Adamic-Adar + Jaccard + IDF scoring
 - `traverse_and_weight.py` - Combined BFS traversal and IDF weighting
 - `traverse.py` - BFS graph traversal from seed releases
 - `weight.py` - IDF weighting for graph features
 - `similar.py` - Find similar releases for a single Discogs URL
-- `ingest.py` - Discogs API client + Neo4j ingestion
-- `graph.py` - Neo4j query interface
 - `rank_feature.py` - Feature ranking utilities
 
-**Supporting:**
+**Root** - Core infrastructure:
+- `ingest.py` - Discogs API client + Neo4j ingestion
+- `graph.py` - Neo4j query interface
+- `lib.py` - Shared utility functions
 - `cache.py` - Redis caching for API responses and correlations
 - `config.py` - Environment configuration and logging
-- `lib.py` - Shared utility functions
 - `install_deps.sh` - Install Python dependencies
 - `start_servers.sh` - Start Neo4j and Redis servers
 

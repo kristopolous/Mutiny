@@ -8,10 +8,14 @@ and computes IDF-weighted similarity against ALL source releases combined.
 Uses functions from lib.py and traverse.py for reusability and testability.
 """
 import sys
+import os
 import json
 import argparse
 from dotenv import load_dotenv
 load_dotenv()
+
+# Add parent directory for imports (lib)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import from our library
 from lib import extract_release_ids

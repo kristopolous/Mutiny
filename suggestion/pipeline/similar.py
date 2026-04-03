@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 import sys
+import os
 import json
+
+# Add parent directory for imports (ingest, config, lib)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from ingest import extract_discogs_id, find_similar_releases
 
 def main():
