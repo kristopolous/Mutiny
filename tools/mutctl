@@ -31,7 +31,7 @@ volume() {
 
 docmd() {
   echo -e $(date +%s) $(whoami) "$key->($control)\n\t$1" >> "$TMP"/keycode
-  MUT_TMP=$TMP $1
+  MUT_TMP=$TMP timeout 5s $1
 }
 
 if [[ $1 == 'd' ]]; then
