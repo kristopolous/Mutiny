@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 import sys
+import os
 import json
 import argparse
 import logging
 import math
+
+# Add parent directory for imports (config, ingest, lib)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import config  # Sets up logging from LOGLEVEL env var
 from ingest import extract_discogs_id, ingest_release_with_connections
 from similar import find_similar_releases_with_meta, fetch_release
