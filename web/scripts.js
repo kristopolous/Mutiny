@@ -192,6 +192,7 @@ function bail (){
 }
 function d(skip, orig) {
   if (!_DOM.controls.className) {
+    console.log(_my, _next);
     let next = _next[skip];
 
     if (next) {
@@ -459,6 +460,7 @@ window.onload = () => {
     window.localStorage.mutiny_start = e.target.value;
   }
 
+  // this sometimes plays the same track just once... don't know why
   _DOM.player.onended = () => {
     // we want to differentiate this track forward from the tapped one
     // in order to go to the beginning of the track

@@ -72,16 +72,14 @@ convert_songs() {
         echo " - ($path_m5a)"
         echo " - ($path_opus)"
       fi
-
-      ## batch insertion
       if (( n > 80 )); then
+        echo ""
         sqlite3 $playdb < conv_update.sql
         truncate --size 0 conv_update.sql
         n=0
       fi
     fi
   done
-
   sqlite3 $playdb < conv_update.sql
   truncate --size 0 conv_update.sql
   dbg "converting done"
