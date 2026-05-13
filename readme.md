@@ -1,6 +1,8 @@
 # Mutiny: Intentionally Underground Music Explorer
 
-Services like Spotify don't cut it: they end up tending towards some definition of collective approval, some kind of popular.
+**The problem**: Services like Spotify don't cut it for people who value exploration over familiarity. they end up tending towards some definition of collective approval, some kind of popular.
+
+Essentially no matter where in the long tail you start, you drift upward on the tail.
 
 Other systems try to classify music and look for similar orchestration and structure. Wrong again. That's not what new music is about.
 
