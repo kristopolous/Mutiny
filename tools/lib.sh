@@ -531,9 +531,10 @@ record_listen() {
   # this is really slow and potentially
   # destructive.
   #sed -Ei "/^$st\ /d" $start_dir/.listen_done
+  [[ -r "$start_dir/.listen_done" ]] || read -p "Failed to read $start_dir/.listen_done, waiting" throwaway
 
   # Also record how many audio files we saw at the time
-  echo "$i $n ($stats) $me $(date +%Y%m%d)" >> $start_dir/.listen_done
+  echo "$i $n ($stats) $me $(date +%Y%m%d)" >> "$start_dir/.listen_done"
 
   # If we do this too frequently it's pretty broken
   # But we also have to be smart enough to not block us out
