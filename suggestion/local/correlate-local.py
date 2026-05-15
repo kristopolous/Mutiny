@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import sqlite3
+from config import logging
 from html import unescape
 from difflib import SequenceMatcher
 
@@ -242,6 +243,7 @@ def correlate_local(conn, parsed_data, html_path):
 
 def process_path(conn, path, json_output=False, output_file=None):
     """Process a single path and output results."""
+    logging.debug(f"{path}")
     html_path = resolve_html_path(path)
     
     if not html_path or not os.path.exists(html_path):
