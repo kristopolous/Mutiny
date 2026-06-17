@@ -289,6 +289,7 @@ window.onload = () => {
         title: "Paused",
       });
       pauseFlag = true;
+      navigator.mediaSession.playbackState = "paused";
     });
     navigator.mediaSession.setActionHandler("play", async () => {
       let delta = new Date() - toggleTime;
@@ -302,6 +303,10 @@ window.onload = () => {
         artist: delta,
       });
       pauseFlag = false;
+      navigator.mediaSession.playbackState = "playing";
+    });
+    navigator.mediaSession.setActionHandler('stop', () => {
+      navigator.mediaSession.playbackState = "none";
     });
     //
     // 1 tap  = track
@@ -483,5 +488,24 @@ window.onload = () => {
   } catch(ex) {
     bail();
   }
+  let wakeLock = null;
+
+  async function requestWakeLock() {
+      try {
+          if ('wakeLock' in navigator) {
+              wakeLock = await navigator.wakeLock.request('screen');
+              console.log('CPU/Screen Lock Active');
+          }
+      } catch (err) {
+          console.error(`${err.name}, ${err.message}`);
+      }
+  }
+
+  // Re-request lock if user leaves and returns to app
+  document.addEventListener('visibilitychange', async () => {
+      if (wakeLock !== null && document.visibilityState === 'visible') {
+          wakeLock = await navigator.wakeLock.request('screen');
+      }
+  });
   window.addEventListener("hashchange", () => !_lock.hash && d(parsehash()));
 };
