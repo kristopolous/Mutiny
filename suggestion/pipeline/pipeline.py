@@ -27,9 +27,21 @@ from weight import compute_weights
 from lib import extract_release_ids
 
 
+TAG_SCORES = {
+    "__purge": 0,
+    "__rating_3": 1,
+    "__rating_4": 2,
+    "__rating_5": 3,
+}
+
+
 def parse_preferences(filepath):
     """
     Parse preferences file.
+    
+    Format: label/catalog __tag (time:X:Y) username date
+    Known tags: __purge (negative), __rating_3 (score=1), __rating_4 (score=2),
+                __rating_5 (score=3). Unknown tags are silently skipped.
     
     Returns:
         positive: list of (path, score) tuples for positive preferences
@@ -44,22 +56,21 @@ def parse_preferences(filepath):
             if not line or line.startswith('#'):
                 continue
             
-            parts = line.rsplit(None, 1)
-            if len(parts) != 2:
-                print(f"Skipping invalid line: {line}", file=sys.stderr)
+            parts = line.split()
+            if len(parts) < 2:
                 continue
             
-            path, score = parts
-            try:
-                score = int(score)
-            except ValueError:
-                print(f"Invalid score on line: {line}", file=sys.stderr)
+            path = parts[0]
+            tag = parts[1]
+            
+            score = TAG_SCORES.get(tag)
+            if score is None:
                 continue
             
-            if score > 0:
-                positive.append((path, score))
-            else:
+            if tag == "__purge":
                 negative.append((path, score))
+            else:
+                positive.append((path, score))
     
     return positive, negative
 
