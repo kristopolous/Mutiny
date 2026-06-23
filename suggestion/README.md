@@ -31,7 +31,7 @@ cp dot_env.example .env
 source .venv/bin/activate
 ```
 
-### 2. PostgreSQL (optional, needed for local correlation)
+### 2. PostgreSQL (optional, needed for local correlation and Discogs XML import)
 
 Run via Docker (or use a local install):
 
@@ -45,7 +45,35 @@ export DATABASE_URL="postgresql://postgres:password@localhost/discogs"
 createdb -h localhost -U postgres discogs
 ```
 
-Without PostgreSQL, correlation falls back to the Discogs API (`correlate/correlate.py`),
+Add `DATABASE_URL` to `.env` so scripts pick it up automatically.
+
+### 3. Import Discogs XML dump (one-time, ~5 hours)
+
+Download the **releases** data dump using the helper script (only `discogs_YYYYMMDD_releases.xml.gz` is needed — artists and labels are extracted from the release records):
+
+```bash
+./local/download-discogs-dump.sh
+```
+
+This saves the file as `discogs_YYYYMMDD_releases.xml.gz` and symlinks it to
+`discogs_releases.xml.gz`. Running it again when the DB is already populated
+will warn you and exit.
+
+Then import:
+
+```bash
+# Extract (the gz file contains a single XML)
+gunzip discogs_releases.xml.gz
+
+# Import into PostgreSQL
+./local/discogs-xml-to-pg.py discogs_releases.xml
+```
+
+This imports ~18M releases into PostgreSQL, creating tables for releases, artists,
+tracks, and their relationships. Only needed if you want to correlate Bandcamp
+releases offline instead of using the Discogs API.
+
+Without PostgreSQL, Bandcamp correlation uses the Discogs API (`correlate/correlate.py`),
 which is slower (~9s per release) but doesn't need a local database.
 
 ## Usage
@@ -68,12 +96,12 @@ EOF
 
 1. Import Discogs XML dump (one-time, ~5 hours):
 ```bash
-./local/discogs-xml-to-pg.py discogs.xml --db $DATABASE_URL
+./local/discogs-xml-to-pg.py discogs_$(date +%Y%m%d)_releases.xml
 ```
 
 2. Correlate Bandcamp pages to Discogs IDs:
 ```bash
-find <bandcamp-dir> -name page.html | ./local/correlate-local-pg.py --db $DATABASE_URL -v
+find <bandcamp-dir> -name page.html | ./local/correlate-local-pg.py -v
 ```
 
 3. Traverse and weight from seed releases:
