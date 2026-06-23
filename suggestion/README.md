@@ -40,7 +40,8 @@ label/release-dont-like 0
 EOF
 
 # Run pipeline: correlate → traverse → weight → rank
-./pipeline/pipeline.py -f prefs.txt -d 2 -n 20
+# --db is the PostgreSQL connection string from DATABASE_URL
+./pipeline/pipeline.py -f prefs.txt -d 2 -n 20 --db "$DATABASE_URL"
 ```
 
 **Step-by-step:**
