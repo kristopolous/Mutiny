@@ -16,9 +16,12 @@ Uses IDF-style weighting to surface long-tail discoveries over popular releases.
 - Python 3.12+
 - Neo4j (bolt://localhost:7687)
 - Redis (localhost:6379)
+- PostgreSQL 16+ (for local Discogs XML import and Bandcamp correlation)
 - Discogs API token
 
 ## Setup
+
+### 1. Start infrastructure servers
 
 ```bash
 ./install_deps.sh
@@ -27,6 +30,23 @@ cp dot_env.example .env
 ./start_servers.sh
 source .venv/bin/activate
 ```
+
+### 2. PostgreSQL (optional, needed for local correlation)
+
+Run via Docker (or use a local install):
+
+```bash
+docker run -d -p 5432:5432 \
+  -e POSTGRES_PASSWORD=password \
+  --name postgres \
+  postgres:16
+
+export DATABASE_URL="postgresql://postgres:password@localhost/discogs"
+createdb -h localhost -U postgres discogs
+```
+
+Without PostgreSQL, correlation falls back to the Discogs API (`correlate/correlate.py`),
+which is slower (~9s per release) but doesn't need a local database.
 
 ## Usage
 
