@@ -21,15 +21,27 @@ import os
 # Add parent directory for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from correlate_local_pg import process_path as correlate_to_discogs
+from local.correlate_local_pg import process_path as correlate_to_discogs
 from traverse import traverse
 from weight import compute_weights
 from lib import extract_release_ids
 
 
+TAG_SCORES = {
+    "__purge": 0,
+    "__rating_3": 1,
+    "__rating_4": 2,
+    "__rating_5": 3,
+}
+
+
 def parse_preferences(filepath):
     """
     Parse preferences file.
+    
+    Format: label/catalog __tag (time:X:Y) username date
+    Known tags: __purge (negative), __rating_3 (score=1), __rating_4 (score=2),
+                __rating_5 (score=3). Unknown tags are silently skipped.
     
     Returns:
         positive: list of (path, score) tuples for positive preferences
@@ -44,22 +56,21 @@ def parse_preferences(filepath):
             if not line or line.startswith('#'):
                 continue
             
-            parts = line.rsplit(None, 1)
-            if len(parts) != 2:
-                print(f"Skipping invalid line: {line}", file=sys.stderr)
+            parts = line.split()
+            if len(parts) < 2:
                 continue
             
-            path, score = parts
-            try:
-                score = int(score)
-            except ValueError:
-                print(f"Invalid score on line: {line}", file=sys.stderr)
+            path = parts[0]
+            tag = parts[1]
+            
+            score = TAG_SCORES.get(tag)
+            if score is None:
                 continue
             
-            if score > 0:
-                positive.append((path, score))
-            else:
+            if tag == "__purge":
                 negative.append((path, score))
+            else:
+                positive.append((path, score))
     
     return positive, negative
 
@@ -116,7 +127,7 @@ def correlate_preferences(preferences, redis_client, db_url, verbose=False):
         
         # Not in cache - would need to correlate
         # For now, skip uncached entries
-        print(f"[NOT CACHED] {stub} - run correlate-local-pg.py first", file=sys.stderr)
+        print(f"[NOT CACHED] {stub} - run local/correlate_local_pg.py first", file=sys.stderr)
     
     conn.close()
     return discogs_map
@@ -147,7 +158,7 @@ def run_pipeline(preferences_file, db_url, depth=2, top_n=20, redis_client=None,
     
     if not discogs_positive:
         print("No positive preferences could be correlated to Discogs IDs.", file=sys.stderr)
-        print("Run: find <dir> -name page.html | ./correlate-local-pg.py --db $DATABASE_URL", file=sys.stderr)
+        print("Run: find <dir> -name page.html | ./local/correlate_local_pg.py --db $DATABASE_URL", file=sys.stderr)
         return []
     
     print(f"Correlated to {len(discogs_positive)} Discogs releases (positive)", file=sys.stderr)
@@ -219,7 +230,7 @@ def main():
     parser.add_argument(
         '--db',
         default=os.environ.get('DATABASE_URL'),
-        help='PostgreSQL URL (default: $DATABASE_URL)'
+        help='PostgreSQL connection string (default: $DATABASE_URL, e.g. postgresql://user:pass@localhost:5432/discogs)'
     )
     parser.add_argument(
         '-v', '--verbose',

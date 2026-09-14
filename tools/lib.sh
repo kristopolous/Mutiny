@@ -204,6 +204,7 @@ breaker() {
 
 _doc['ardy_stat']="( ([123T]|*), args ) Writes playlist stats to the arduino socket"
 ardy_stat() {
+  [[ -r "$tmp/ardy_socket" ]] || return 0
   {
     case $1 in
       [123] )
@@ -216,7 +217,7 @@ ardy_stat() {
         printf "$1$2"
         ;;
     esac
-  } > $tmp/ardy_socket
+  } > "$tmp/ardy_socket"
 }
 
 _doc['announce']="[ internal ] Puts up the next track to an active X display through aosd_cat and sends it off to an arduino socket"
@@ -224,7 +225,7 @@ announce() {
   [[ -n "$NOANNOU" ]] && echo "$*" | aosd_cat -p 2  -n "Noto Sans Condensed ExtraBold 150" -R white -f 1000 -u 15000 -o 2000 -x -20 -y 20 -d 50 -r 190 -b 216 -S black -e 2 -B black -w 3600 -b 200&
   IFS="-"
   read -ra tp <<< "$@"
-  printf "1%-32s2%-32s" "${tp[0]}" "${tp[1]}" > $tmp/ardy_socket
+  printf "1%-32s2%-32s" "${tp[0]}" "${tp[1]}" > "$tmp/ardy_socket"
   unset IFS
 }
 

@@ -58,6 +58,10 @@ function parsehash() {
   return hash[2];
 }
 
+function dbg(str){
+  document.querySelector("#debug").innerHTML += str + "<br/>";
+}
+
 function play_url(play) {
   if (!play) {
     window.location.hash = "";
@@ -289,6 +293,7 @@ window.onload = () => {
         title: "Paused",
       });
       pauseFlag = true;
+      navigator.mediaSession.playbackState = "paused";
     });
     navigator.mediaSession.setActionHandler("play", async () => {
       let delta = new Date() - toggleTime;
@@ -296,12 +301,17 @@ window.onload = () => {
         return;
       }
       await _DOM.player.play();
+      await requestWakeLock();
 
       Object.assign(navigator.mediaSession.metadata, {
         title: "Play",
         artist: delta,
       });
       pauseFlag = false;
+      navigator.mediaSession.playbackState = "playing";
+    });
+    navigator.mediaSession.setActionHandler('stop', () => {
+      navigator.mediaSession.playbackState = "none";
     });
     //
     // 1 tap  = track
@@ -454,6 +464,7 @@ window.onload = () => {
       e.target.currentTime = (_DOM.start.value / 100) * e.target.duration;
     }
     _DOM.player.play();
+    requestWakeLock();
   });
 
   _DOM.start.onchange = (e) => {
@@ -483,5 +494,28 @@ window.onload = () => {
   } catch(ex) {
     bail();
   }
+  let wakeLock = null;
+  dbg("screen");
+
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        dbg('CPU/Screen Lock Active');
+      }
+      else {
+        dbg('No wakelock');
+      }
+    } catch (err) {
+      console.error(`${err.name}, ${err.message}`);
+    }
+  }
+
+  // Re-request lock if user leaves and returns to app
+  document.addEventListener('visibilitychange', async () => {
+      if (wakeLock !== null && document.visibilityState === 'visible') {
+          wakeLock = await navigator.wakeLock.request('screen');
+      }
+  });
   window.addEventListener("hashchange", () => !_lock.hash && d(parsehash()));
 };

@@ -257,3 +257,15 @@ li.selected {
 #list input {
 	width: auto;
 }
+#debug{
+  position:fixed;
+  bottom:0;
+  right:0;
+  width:10rem
+  height:4rem
+  font-family:monospace;
+  font-size:11px;
+  color: white;
+  background: black;
+  overflow-y:scroll;
+}
