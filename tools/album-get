@@ -1,5 +1,10 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# this is needed in case your yt-dlp is installed 
+# through like pip or uv
+PATH="$PATH:/home/$USER/.local/bin/"
+
 FULLALBUM=1
 final_judgement=
 
