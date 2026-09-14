@@ -912,7 +912,10 @@ manual_pull() {
 
   if [[ ! "$1" =~ "/track/" ]] ; then
     for track in $(curl -Ls "$1" | grep -Po '((?!a href=\")/track\/[^\&"]*)' | sed -E s'/[?#].*//' | sort | uniq); do
-      _ytdl "https://$base/${track##/}" "$path"
+      mp3_to_get=$(curl -sL "https://$base/${track##/}" | grep -Po 'https:.{3,8}bcbits.com.stream.[a-f0-9]{30,40}\/mp3.*?(?=\&quot;\})' | python3 -c 'import html,sys; sys.stdout.write(html.unescape(sys.stdin.read()))')
+      fname_path="${track#/track/}"
+      echo "$mp3_to_get $path/${fname_path}.mp3"
+      curl -sL "$mp3_to_get" > "$path/${fname_path}.mp3"
     done
     pl_fallback "$path"
     pl_check "$path"
@@ -927,7 +930,8 @@ get_mp3s() {
   local url="$1"
   local path="$2"
 
-  _ytdl "$url" "$path" 
+  manual_pull "$url" "$path"
+  # _ytdl "$url" "$path" 
   get_playlist "$url" "$path"
 }
 
