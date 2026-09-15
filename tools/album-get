@@ -149,6 +149,7 @@ while [[ $# -gt 0 ]]; do
   #echo $url $list; exit
   # If we didn't get anything then the domain is "probably" gone, let's record that.
   if [[ -z "$list" ]]; then
+    cat "$base/$PAGE"
     echo "  !! ~~~ $base @ $url Disappeared! ~~~" 
     echo "$url $base $(date +%Y%m%d)" >> "$base_path/.dl_failure"
   fi
@@ -159,6 +160,7 @@ while [[ $# -gt 0 ]]; do
 
     if [[ -e "$place/no" ]]; then 
       if [[ ! -e "$place/"$PAGE ]]; then
+        sleep 10
         get_page "$place"
       fi
       #echo   "     $release"
@@ -250,7 +252,7 @@ while [[ $# -gt 0 ]]; do
       # case we mark it as skippable
       if [[ -z "$isnew" ]]; then
         # this is a manual scrape for $YTDL which can get confused.
-        manual_pull_flag=0
+        #manual_pull_flag=0
 
         # we put in some kind of backoff strategy
         sleep $SLEEP_MIN
@@ -273,7 +275,6 @@ while [[ $# -gt 0 ]]; do
         [[ -n "$manual_pull_flag" ]] && manual_pull "$url" "$place" || get_mp3s "$url" "$place"
       else
         get_urls "$url" "$place"
-        #manual_pull "$url" "$place"
       fi
       get_page "$place"
 

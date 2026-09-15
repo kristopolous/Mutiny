@@ -48,8 +48,8 @@ YTDL=${YTDL:=yt-dlp}
 FORMAT="-f mp3-128"
 
 # These are finer options for scraping that tries to not be too greedy
-SLEEP_MIN=1
-SLEEP_MAX=3
+SLEEP_MIN=5
+SLEEP_MAX=10
 
 # We can optimize things if we assume there's no such things as a playlist that
 # points to URLS that expire
@@ -461,7 +461,7 @@ open_page() {
 
 _doc['get_playlist']="[ internal ] "
 get_playlist() {
-  echo PLAYLIST CREATION GG
+  #echo PLAYLIST CREATION GG
   PLAYLIST_DBG=$tmp/playlist-interim:$(_stub "$2"):$(date +%s)
   local failed=
   local tomatch=
@@ -931,7 +931,6 @@ get_mp3s() {
   local url="$1"
   local path="$2"
 
-  #manual_pull "$url" "$path"
   _ytdl "$url" "$path" 
   get_playlist "$url" "$path"
 }
