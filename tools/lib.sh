@@ -48,8 +48,8 @@ YTDL=${YTDL:=yt-dlp}
 FORMAT="-f mp3-128"
 
 # These are finer options for scraping that tries to not be too greedy
-SLEEP_MIN=5
-SLEEP_MAX=10
+SLEEP_MIN=8
+SLEEP_MAX=15
 
 # We can optimize things if we assume there's no such things as a playlist that
 # points to URLS that expire
