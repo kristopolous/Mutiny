@@ -149,7 +149,6 @@ while [[ $# -gt 0 ]]; do
   #echo $url $list; exit
   # If we didn't get anything then the domain is "probably" gone, let's record that.
   if [[ -z "$list" ]]; then
-    cat "$base/$PAGE"
     echo "  !! ~~~ $base @ $url Disappeared! ~~~" 
     echo "$url $base $(date +%Y%m%d)" >> "$base_path/.dl_failure"
   fi
@@ -243,6 +242,7 @@ while [[ $# -gt 0 ]]; do
         url=https://$base_url$full
       fi
       echo "  ⇩ $url"
+      sleep 10
       echo "$url" > "$place"/domain
 
       [[ -e "$place"/no-files ]] && continue
