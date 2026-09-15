@@ -273,6 +273,7 @@ while [[ $# -gt 0 ]]; do
         [[ -n "$manual_pull_flag" ]] && manual_pull "$url" "$place" || get_mp3s "$url" "$place"
       else
         get_urls "$url" "$place"
+        #manual_pull "$url" "$place"
       fi
       get_page "$place"
 

@@ -931,8 +931,8 @@ get_mp3s() {
   local url="$1"
   local path="$2"
 
-  manual_pull "$url" "$path"
-  # _ytdl "$url" "$path" 
+  #manual_pull "$url" "$path"
+  _ytdl "$url" "$path" 
   get_playlist "$url" "$path"
 }
 
