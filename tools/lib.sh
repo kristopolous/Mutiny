@@ -917,6 +917,7 @@ manual_pull() {
       echo "$mp3_to_get $path/${fname_path}.mp3"
       curl -sL "$mp3_to_get" > "$path/${fname_path}.mp3"
     done
+    get_page "$path"
     pl_fallback "$path"
     pl_check "$path"
   else 
