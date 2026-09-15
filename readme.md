@@ -32,7 +32,7 @@ The rest of this document is from an older readme about the project. This is a w
 
 A set of tools for exploring music surrounding yt-dlp and mpv (although that is configurable)
 
-There's also a way to navigate and control the music that uses lua and optionally things like usb foot pedals or MIDI controllers, really. I also use an arduino with an LCD display for the tracks, that  code is in there too. These are all optional and the tools work seamlessly with or without them, whether you are connected or not connected to the internet.
+**2026-09-14**: Important note, you need "yt-dlp[default,curl-cffi]" now.
 
 Additionally there's music-discovery navigation tools that involve discogs, search engine apis, soundcloud, archive.org, youtube, and bandcamp. That one is done in python and has a web-interface (the code isn't here yet). Hopefully I'll get it cleaned up and presentable.
 
