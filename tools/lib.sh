@@ -19,6 +19,9 @@ NOUNDO=${NOUNDO:=}
 # If left unset, will use the localhost
 HOST=
 
+# There's sometimes collisions in names ... this is a pretty breaking change, 6 years in, great
+PFX=__mutiny_986bd032_
+
 PLAYER=mpv
 player_opts_orig='--no-cache --no-audio-display --msg-level=cplayer=no --term-playing-msg=\n${media-title} --script='"$DIR"'/mpv-interface.lua --input-ipc-server='"$tmp"'/mpvsocket'
 player_opts_dbg="--msg-level=all=debug"
@@ -283,7 +286,7 @@ _doc['check_url']="[ internal ] Gets the effective url and stores it as the refe
 check_url() {
   real_url=$(curl -Ls -o /dev/null -w %{url_effective} "$1")
   if [[ "$real_url" != "$1" ]]; then
-    echo $real_url > "$2"/domain
+    echo $real_url > "$2/${PFX}domain"
     echo $real_url
   fi
 }
@@ -396,11 +399,11 @@ unpurge() {
 _doc['resolve']="( path ) Figures out the url resolution for given path"
 resolve() {
   local path=${1#$start_dir/}
-  if [[ -e "$1/domain" ]]; then
-    echo $(cat "$1/domain" )
+  if [[ -e "$1/${PFX}domain" ]]; then
+    echo $(cat "$1/${PFX}domain" )
   else
     label=$( dirname "$path" )
-    [[ -e "$label/domain" ]] && domain=$(cat $label/domain ) || domain=${label/.\//}.bandcamp.com
+    [[ -e "$label/${PFX}domain" ]] && domain=$(cat "$label/${PFX}domain" ) || domain=${label/.\//}.bandcamp.com
     release=$( basename "$path" )
     echo "https://$domain/album/$release"
   fi
@@ -648,7 +651,7 @@ _url() {
   local domain
   local release
   local label=$( dirname "$1" )
-  [[ -e "$label/domain" ]] && domain=$(< "$label/domain" ) || domain=${label}.bandcamp.com
+  [[ -e "$label/${PFX}domain" ]] && domain=$(< "$label/${PFX}domain" ) || domain=${label}.bandcamp.com
   release=$( basename "$1" )
   echo "https://$domain/album/$release"
 }
@@ -937,7 +940,7 @@ get_mp3s() {
 
 _doc['single_album']="( url ) Downloads a single album via a url into the current directory"
 single_album() {
-  echo "$1" > domain
+  echo "$1" > "${PFX}domain"
   get_mp3s "$1" "$(pwd)"
   get_page "$(pwd)"
 }
@@ -954,10 +957,10 @@ details() {
     label_path=$(dirname "$release_path")
     label=$(basename "$label_path")
          
-    if [[ -e $release_path/domain ]]; then
-      release_url=$(< $release_path/domain ) 
-    elif [[ -e $label_path/domain ]]; then
-      release_url=$(< $label_path/domain )/$release
+    if [[ -e "$release_path/${PFX}domain" ]]; then
+      release_url=$(< "$release_path/${PFX}domain" ) 
+    elif [[ -e "$label_path/${PFX}domain" ]]; then
+      release_url=$(< "$label_path/${PFX}domain" )/$release
     else
       release_url=https://${label}.bandcamp.com/album/$release
     fi
@@ -971,8 +974,8 @@ details() {
 _doc['get_links']="() Generates the url of the level-5 listens in the listen_done"
 get_links() {
   cat .listen_done | grep rating_5 | awk ' { print $1 } ' | while read line; do
-    if [[ -e $line/domain ]]; then
-      cat $line/domain
+    if [[ -e "$line/${PFX}domain" ]]; then
+      cat "$line/${PFX}domain"
     else
       echo $line | awk -F \/ ' { print "https://"$1".bandcamp.com/album/"$2 }' 
     fi

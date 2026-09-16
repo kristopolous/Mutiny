@@ -1,5 +1,6 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PFX=__mutiny_986bd032_
 
 # this is needed in case your yt-dlp is installed 
 # through like pip or uv
@@ -110,7 +111,7 @@ while [[ $# -gt 0 ]]; do
   #
   elif [[ "$arg" =~ '/' && -d "$base_path/$arg" ]]; then 
     base="$arg"
-    list=$(< "$arg/domain" )
+    list=$(< "$arg/${PFX}domain" )
   else
     base="$arg"
     base_url="$base.bandcamp.com"
@@ -121,11 +122,11 @@ while [[ $# -gt 0 ]]; do
   _mkdir "$base"
 
   base_name="$base"
-  if [[ -s "$base/domain" ]]; then
-    base_url=$(< "$base/domain" )
+  if [[ -s "$base/${PFX}domain" ]]; then
+    base_url=$(< "$base/${PFX}domain" )
     base_name="$base_url"
   elif [[ -n "$domain" ]]; then
-    echo "$base_url" > "$base/domain"
+    echo "$base_url" > "$base/${PFX}domain"
   fi
   ttl=$(ls "$base" | grep -v domain | wc -l)
 
@@ -243,7 +244,7 @@ while [[ $# -gt 0 ]]; do
       fi
       echo "  ⇩ $url"
       sleep 10
-      echo "$url" > "$place"/domain
+      echo "$url" > "$place"/"${PFX}"domain
 
       [[ -e "$place"/no-files ]] && continue
 
