@@ -1,6 +1,5 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PFX=__mutiny_986bd032_
 
 # this is needed in case your yt-dlp is installed 
 # through like pip or uv
