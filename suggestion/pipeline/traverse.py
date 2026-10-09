@@ -11,6 +11,24 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from ingest import fetch_release, fetch_artist_releases, safe_get, make_discogs_request
+from ingest import make_discogs_request as _api_make_discogs_request
+
+# Prefer the local SQLite Discogs dump (no rate limits, offline) when it's
+# available; fall back to the Discogs API otherwise.
+try:
+    import local_db
+    if local_db.available():
+        fetch_release = local_db.fetch_release
+        fetch_artist_releases = local_db.fetch_artist_releases
+
+        def make_discogs_request(endpoint, max_retries=3):
+            import re as _re
+            m = _re.match(r'labels/(\d+)/releases\?page=(\d+)', endpoint)
+            if m:
+                return local_db.fetch_label_releases(m.group(1), page=int(m.group(2)))
+            return _api_make_discogs_request(endpoint, max_retries=max_retries)
+except Exception:
+    pass
 
 
 def build_release_index(release_ids):

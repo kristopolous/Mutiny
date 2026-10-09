@@ -78,21 +78,45 @@ which is slower (~9s per release) but doesn't need a local database.
 
 ## Usage
 
-**Full pipeline (recommended):**
+**Suggest from Bandcamp URLs (recommended — no PostgreSQL needed):**
 ```bash
-# Create preferences file
-cat > prefs.txt << EOF
-label/release-love 5
-label/release-ok 2
-label/release-dont-like 0
-EOF
+# Give it Bandcamp release URLs; it correlates them to Discogs, traverses the
+# graph, and returns ranked suggestions (with Bandcamp URLs when known).
+./pipeline/suggest.py -n 10 \
+  https://detund.bandcamp.com/album/multiverse \
+  https://detund.bandcamp.com/album/litmus
 
-# Run pipeline: correlate → traverse → weight → rank
-# --db is the PostgreSQL connection string from DATABASE_URL
-./pipeline/pipeline.py -f prefs.txt -d 2 -n 20 --db "$DATABASE_URL"
+# Raw JSON (machine-readable):
+./pipeline/traverse_and_weight.py -n 10 \
+  https://detund.bandcamp.com/album/multiverse
 ```
 
-**Step-by-step:**
+Correlation is cached in Redis, so the first run for a URL takes a few seconds
+(Bandcamp page fetch + Discogs search) and later runs are instant. Set
+`MUTINY_BASE=<music tree>` to prefer local `page.html` files over the network.
+
+**Suggest from Discogs URLs directly:**
+```bash
+./pipeline/traverse_and_weight.py -n 10 \
+  https://www.discogs.com/release/24262334 \
+  https://www.discogs.com/release/9751144
+```
+
+**Prefer your `.listen_done` history as seeds (experimental):**
+```bash
+# Build a prefs file: <label>/<release> __rating_5  (or __purge, __rating_3/4)
+./pipeline/pipeline.py -f prefs.txt -d 2 -n 20
+```
+Note: `pipeline.py` only resolves seeds that are already in the Redis
+correlation cache; run the correlate step first to populate it.
+
+**Suggest from Discogs URLs directly:**
+```bash
+# Correlate a single Bandcamp release to Discogs (prints the Discogs URL)
+./pipeline/bc.py https://detund.bandcamp.com/album/multiverse
+```
+
+**Step-by-step (Discogs graph path):**
 
 1. Import Discogs XML dump (one-time, ~5 hours):
 ```bash
@@ -126,8 +150,15 @@ find <bandcamp-dir> -name page.html | ./local/correlate-local-pg.py -v
 - `correlate.py` - Match Bandcamp pages to Discogs API with Redis caching (~9s per request)
 
 **pipeline/** - Recommendation pipeline:
-- `pipeline.py` - Full pipeline: preferences → correlate → traverse → weight → rank
-- `aggregate.py` - Multi-release recommender with Adamic-Adar + Jaccard + IDF scoring
+- `suggest.py` - CLI wrapper: Bandcamp URLs in → ranked suggestions out
+- `bc.py` - Bandcamp URL ↔ Discogs release correlation (Redis cache, local
+  page.html, or Bandcamp page fetch + Discogs search); reverse lookup for
+  results
+- `traverse_and_weight.py` - Core: correlate sources → BFS traverse → IDF
+  weight → dedupe → optional Bandcamp annotation
+- `pipeline.py` - Preferences-file (.listen_done style) pipeline (uses
+  cached correlations only)
+- `aggregate.py` - Multi-release recommender with Adamic-Adar + Jaccard + IDF scoring (Neo4j graph path)
 - `traverse_and_weight.py` - Combined BFS traversal and IDF weighting
 - `traverse.py` - BFS graph traversal from seed releases
 - `weight.py` - IDF weighting for graph features
