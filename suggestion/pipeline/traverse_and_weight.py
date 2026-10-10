@@ -74,6 +74,58 @@ def annotate_with_bandcamp(releases, verbose=False):
     return releases
 
 
+def _norm_title(s):
+    """Normalize a title for grouping: strip zero-width chars, collapse spaces."""
+    s = s or ''
+    s = ''.join(c for c in s if c not in '\u200b\u200c\u200d\ufeff')
+    return ' '.join(s.split()).lower()
+
+
+def dedupe_releases(weighted, source_ids):
+    """Collapse Discogs format/edition duplicates into one release per album.
+
+    Groups by (primary artist IDs, normalized title), keeping the first member
+    (input must be sorted by weight desc). A group is dropped entirely if it
+    is a seed album: either a member is a source release, or the group matches
+    the (contributors, title) of a source release - the latter catches the
+    case where the source's own ID was already removed from the list but its
+    other editions (different Discogs release IDs) remain.
+    """
+    import local_db
+
+    source_ids_set = set(str(sid) for sid in source_ids)
+
+    # Identify the seed albums themselves, so their sibling editions are dropped.
+    fetch = local_db.fetch_release if local_db.available() else None
+    if fetch is None:
+        import traverse as _traverse_mod  # module-level fetch_release (API)
+        fetch = _traverse_mod.fetch_release
+    seed_album_keys = set()
+    for sid in source_ids:
+        try:
+            sr = fetch(int(sid))
+        except (ValueError, TypeError):
+            continue
+        if not sr:
+            continue
+        contribs = tuple(sorted(a['id'] for a in sr.get('artists', []) if a.get('id')))
+        seed_album_keys.add((contribs, _norm_title(sr.get('title'))))
+
+    groups = {}
+    group_is_seed = {}
+    for r in weighted:
+        # r['contributors'] are the primary artist IDs (from traverse.py)
+        artists = tuple(sorted(set(r.get('contributors', []))))
+        key = (artists, _norm_title(r.get('title')))
+        is_seed = (str(r.get('release_id')) in source_ids_set) or (key in seed_album_keys)
+        if key not in groups:
+            groups[key] = r
+            group_is_seed[key] = is_seed
+        else:
+            group_is_seed[key] = group_is_seed[key] or is_seed
+    return [groups[k] for k in groups if not group_is_seed[k]]
+
+
 def main():
     parser = argparse.ArgumentParser(description='Traverse and weight releases')
     parser.add_argument('urls', nargs='*', help='Bandcamp or Discogs release URLs')
@@ -119,18 +171,9 @@ def main():
     # Weight - use function from weight.py
     weighted = compute_idf_weights(releases, source_ids)
     
-    # Deduplicate: Discogs lists one album as many releases (formats/editions),
-    # and label catalogs repeat reissues. Group by (artist, title) keeping the
-    # highest-weighted release per group.
-    groups = {}
-    for r in weighted:
-        # r['contributors'] are the primary artist IDs (from traverse.py)
-        artists = tuple(sorted(set(r.get('contributors', []))))
-        key = (artists, r.get('title', '').strip().lower())
-        if key not in groups:
-            groups[key] = r
+    # Deduplicate: one album = many Discogs releases (formats/editions/reissues)
+    weighted = dedupe_releases(weighted, source_ids)
     
-    weighted = list(groups.values())
     if args.top_n > 0:
         weighted = weighted[:args.top_n]
     

@@ -2,6 +2,24 @@
 
 Graph-based music recommendation system using Discogs data and Neo4j.
 
+## Core invariant
+
+**Popularity is worth exactly 0.** Not a small weight, not a tiebreaker,
+not a "signal" — zero. No recommendation may be influenced by how many
+people own, bought, streamed, or listened to a release. The only signals
+are structural: who worked on what, on which label. (The IDF weighting
+rewards *rarity* of shared features — the opposite direction of popularity —
+and is the only thing that differentiates scores.)
+
+Consequences, enforced in code:
+- Bandcamp's "N fans also own" co-ownership counts are parsed nowhere and
+  never used for ranking or display (`pipeline/bc_rec.py` keeps Bandcamp's
+  own page order, no re-ranking).
+- Do not add listener/owner/sales/stream counts, "trending", or any
+  aggregate human-attention metric as a ranking input. If a future change
+  needs a tiebreaker, use something structural (e.g. release year, depth),
+  never popularity.
+
 ## Overview
 
 Finds similar releases by traversing connections between:
@@ -95,6 +113,31 @@ Correlation is cached in Redis, so the first run for a URL takes a few seconds
 (Bandcamp page fetch + Discogs search) and later runs are instant. Set
 `MUTINY_BASE=<music tree>` to prefer local `page.html` files over the network.
 
+**Bandcamp URL resolution (the resolver worker):**
+
+Suggestions only show up in the default output if they resolve to a Bandcamp
+URL (things you can actually get). Resolution order:
+
+1. Redis correlation cache (instant, from your scraped tree / prior runs)
+2. Reverse cache `bc:reverse:<artist>|<title>` (instant, populated by the resolver)
+3. Queued to the **resolver worker**, which searches Bandcamp's own search
+   page at a fixed polite rate (one search every 20s by default) using
+   lightpanda to render the page, and caches the result (7 days) or a
+   short-lived miss (1 hour).
+
+Start the worker once (e.g. in tmux or via systemd):
+```bash
+python3 pipeline/resolver.py                 # runs forever, one search / 20s
+python3 pipeline/resolver.py --interval 10   # faster (don't)
+python3 pipeline/resolver.py --once          # drain one job and exit
+```
+`suggest.py` warns if the worker isn't running (links come from cache only).
+
+**suggest.py options:**
+- `--all` — also include suggestions that have no Bandcamp URL (Discogs-only)
+- `--wait-seconds N` — max seconds to wait for queued resolutions (default 180)
+- `--no-search` — cache only, never queue searches
+
 **Suggest from Discogs URLs directly:**
 ```bash
 ./pipeline/traverse_and_weight.py -n 10 \
@@ -151,6 +194,7 @@ find <bandcamp-dir> -name page.html | ./local/correlate-local-pg.py -v
 
 **pipeline/** - Recommendation pipeline:
 - `suggest.py` - CLI wrapper: Bandcamp URLs in → ranked suggestions out
+- `resolver.py` - background worker: resolves (artist, title) → Bandcamp URL via Bandcamp search at a fixed rate
 - `bc.py` - Bandcamp URL ↔ Discogs release correlation (Redis cache, local
   page.html, or Bandcamp page fetch + Discogs search); reverse lookup for
   results

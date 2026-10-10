@@ -106,6 +106,24 @@ def parse_bc_page(html):
     return parse_description(m.group(1))
 
 
+def bandcamp_meta(url, verbose=False):
+    """Lightweight {title, artists, year, labels} for a Bandcamp album URL.
+
+    Uses the meta description (no JS, no challenge on subdomain album pages).
+    Returns None when the page can't be fetched or parsed.
+    """
+    html = _fetch_page(url, verbose=verbose) if verbose else _fetch_page(url)
+    parsed = parse_bc_page(html) if html else None
+    if not parsed:
+        return None
+    return {
+        'title': parsed['release_name'],
+        'artists': [parsed['artist_name']],
+        'year': parsed.get('year'),
+        'labels': [],
+    }
+
+
 def _search_discogs(parsed):
     """Search Discogs and return candidate releases (API dicts).
 
@@ -366,126 +384,31 @@ def _title_in_description(parsed, title):
     return norm(page_title) == norm(want)
 
 
-def bandcamp_url_for_release(artist, title, verbose=False):
+def bandcamp_url_for_release(artist, title, year=None, discogs_id=None,
+                             wait=0, verbose=False):
     """
     Find a Bandcamp URL for an (artist, title) pair that isn't in the
-    correlation cache. Searches DuckDuckGo HTML for a site:bandcamp.com page,
-    then verifies it via a Discogs search (reuses the same scoring).
+    correlation cache.
 
-    Results (and misses) are cached in Redis under 'bc:reverse' so repeated
-    runs are instant. Returns a Bandcamp URL or None.
+    Live resolution is delegated to the resolver worker (pipeline/resolver.py),
+    which queries Bandcamp's own search page at a fixed polite rate (one
+    search every RESOLVER_INTERVAL seconds, default 20) via lightpanda and
+    caches results in Redis. This function: cache check -> enqueue -> optional
+    bounded wait. Returns a Bandcamp URL, or None if not resolved yet.
     """
-    import requests
-    from urllib.parse import urlparse, unquote
+    from resolver import enqueue, wait_for, _norm
 
     r = _redis()
-    key = f"bc:reverse:{artist.lower()}|{title.lower()}"
+    key = f"bc:reverse:{_norm(artist)}|{_norm(title)}"
     cached = _to_str(r.get(key))
     if cached:
-        if cached == '__none__':
-            return None
-        return cached
+        return None if cached == '__none__' else cached
 
-    # Plain query works better than the site: operator on DDG HTML.
-    # DDG serves a reduced page (and often no results) to bot-like user agents,
-    # so use a real browser UA for the search fetch.
-    query = f"{artist} {title} bandcamp"
-    headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0'}
-    bc_urls = []
-    seen = set()
-    resp = None
-    # DDG rate-limits with HTTP 202 (a reduced/queued page with no results).
-    # Retry a couple of times with backoff before giving up.
-    import time
-    for attempt in range(3):
-        try:
-            resp = requests.get(
-                'https://html.duckduckgo.com/html/',
-                params={'q': query},
-                headers=headers,
-                timeout=20,
-            )
-        except requests.RequestException as e:
-            if verbose:
-                print(f"[BC-REV] search failed for {artist} - {title}: {e}", file=sys.stderr)
-            resp = None
-            break
-        if resp.status_code == 202:
-            if verbose:
-                print(f"[BC-REV] rate-limited (202), retry {attempt + 1}/3 for {artist} - {title}", file=sys.stderr)
-            time.sleep(15 * (attempt + 1))
-            continue
-        break
+    if enqueue(artist, title, year=year, discogs_id=discogs_id) and verbose:
+        print(f"[BC-REV] queued for Bandcamp search: {artist} - {title}", file=sys.stderr)
 
-    if resp is not None and resp.status_code == 200:
-        # DDG wraps result URLs: href="...uddg=<urlencoded>"
-        for m in re.finditer(r'uddg=([^"&]+)', resp.text):
-            url = unquote(m.group(1))
-            p = urlparse(url)
-            host = p.netloc.lower().split(':')[0]
-            if not (host.endswith('.bandcamp.com') and host != 'bandcamp.com'):
-                continue
-            if '/album/' not in url and not re.search(r'bandcamp\.com/[^/]+/?$', url):
-                continue
-            if url not in seen:
-                seen.add(url)
-                bc_urls.append(url)
-
-    # No candidate URLs: this is usually DDG rate-limiting (a reduced page
-    # with no results), NOT a real "not found". Don't cache the miss so the
-    # next run retries instead of being poisoned for a week.
-    if not bc_urls:
-        if verbose:
-            print(f"[BC-REV] no bandcamp urls for {artist} - {title} (not caching miss)", file=sys.stderr)
-        return None
-
-    # Parse candidate pages and verify. Prefer Discogs scoring; fall back to
-    # a simple title match on the page's own meta description if the Discogs
-    # API is unavailable (rate-limited).
-    title_matched_any = False
-    for url in bc_urls[:5]:
-        html = _fetch_page(url)
-        if not html:
-            continue
-        parsed = parse_bc_page(html)
-        if not parsed:
-            continue
-        # Primary: full Discogs verification
-        candidates = _search_discogs(parsed)
-        if candidates:
-            best_conf, best_c = 0.0, None
-            for c in candidates[:10]:
-                try:
-                    conf, _t, _a, _s = score_match(parsed, c)
-                except Exception:
-                    continue
-                if conf >= MIN_CONFIDENCE and conf > best_conf:
-                    best_conf, best_c = conf, c
-            if best_c is not None:
-                subdomain = urlparse(url).netloc.lower().split(':')[0].split('.')[0]
-                stub = f"{subdomain}/{urlparse(url).path.strip('/').split('/')[-1]}"
-                discogs_url = f"https://www.discogs.com/release/{best_c.get('id')}"
-                r.hset('bc2dg', stub, discogs_url)
-                if verbose:
-                    print(f"[BC-REV] {artist} - {title} -> {url} (via {discogs_url}, {best_conf:.0%})", file=sys.stderr)
-                r.setex(key, 604800, url)
-                return url
-        # Fallback: accept if the page's description matches the title
-        elif _title_in_description(parsed, title):
-            subdomain = urlparse(url).netloc.lower().split(':')[0].split('.')[0]
-            stub = f"{subdomain}/{urlparse(url).path.strip('/').split('/')[-1]}"
-            if verbose:
-                print(f"[BC-REV] {artist} - {title} -> {url} (title match, no Discogs verify)", file=sys.stderr)
-            r.setex(key, 604800, url)
-            return url
-        title_matched_any = title_matched_any or _title_in_description(parsed, title)
-
-    # Reached here only if URLs existed but none verified. Cache a short-lived
-    # miss only when the title genuinely mismatched (a real "not found"); if
-    # the title matched but Discogs verification was unavailable, don't cache
-    # so a later run can retry once the API recovers.
-    if not title_matched_any:
-        r.setex(key, 3600, '__none__')
+    if wait > 0:
+        return wait_for(artist, title, timeout=wait)
     return None
 
 
