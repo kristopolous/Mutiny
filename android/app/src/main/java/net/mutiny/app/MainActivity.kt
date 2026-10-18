@@ -22,6 +22,8 @@ import android.widget.PopupMenu
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 
@@ -62,6 +64,15 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        // targetSdk 35 is edge-to-edge on Android 15+: keep the page out
+        // from under the status / navigation bars and the camera cutout
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
         web = findViewById(R.id.web)
         setupWebView()
         findViewById<ImageButton>(R.id.fab).setOnClickListener { showMenu(it) }
@@ -120,10 +131,22 @@ class MainActivity : AppCompatActivity() {
     private fun hostOf(base: String): String =
         base.removePrefix("https://").removePrefix("http://").substringBefore('/').substringBefore(':')
 
+    override fun onResume() {
+        super.onResume()
+        // (re)start the service while we're allowed to (in front): it may
+        // have been stopped by an older instance of this activity
+        PlayerService.start(this)
+        PlayerService.instance?.controller = controller
+    }
+
     override fun onDestroy() {
-        PlayerService.instance?.controller = null
+        val s = PlayerService.instance
+        val ours = s?.controller === controller
+        if (ours) s?.controller = null
         if (bound) unbindService(conn)
-        PlayerService.stop(this)
+        // only when this activity really goes away: a stale instance being
+        // torn down must not stop the service the current one is using
+        if (ours && isFinishing && !isChangingConfigurations) PlayerService.stop(this)
         web.destroy()
         super.onDestroy()
     }
@@ -228,8 +251,38 @@ class MainActivity : AppCompatActivity() {
 (function () {
   if (window.__mutiny) return;
   var H = {};
+  var pending = 0;
+  function soon() { if (!pending) pending = setTimeout(function () { pending = 0; report(); }, 50); }
+  // Android WebView has no Media Session API, so the page's own media-key
+  // code (multi-tap skip etc.) would never register. Provide one: the page
+  // registers its handlers here and the native session calls them.
+  if (!self.MediaMetadata) {
+    self.MediaMetadata = function (init) {
+      init = init || {};
+      this.title = init.title || '';
+      this.artist = init.artist || '';
+      this.album = init.album || '';
+      this.artwork = init.artwork || [];
+    };
+  }
   var ms = navigator.mediaSession;
-  if (ms && ms.setActionHandler) {
+  if (!ms) {
+    var meta = null;
+    ms = {
+      playbackState: 'none',
+      setActionHandler: function (a, f) { H[a] = f; },
+      setPositionState: function () {}
+    };
+    // the page mutates metadata in place (Object.assign), so watch writes
+    Object.defineProperty(ms, 'metadata', {
+      get: function () { return meta; },
+      set: function (v) {
+        meta = v ? new Proxy(v, { set: function (o, k, val) { o[k] = val; soon(); return true; } }) : null;
+        soon();
+      }
+    });
+    Object.defineProperty(navigator, 'mediaSession', { value: ms, configurable: true });
+  } else if (ms.setActionHandler) {
     var orig = ms.setActionHandler.bind(ms);
     ms.setActionHandler = function (a, f) { H[a] = f; try { orig(a, f); } catch (e) {} };
   }
@@ -239,6 +292,7 @@ class MainActivity : AppCompatActivity() {
     if (!p || !window.Mutiny) return;
     var m = (ms && ms.metadata) || {};
     var art = (m.artwork && m.artwork.length) ? m.artwork[m.artwork.length - 1].src : '';
+    try { if (art) art = new URL(art, location.href).href; } catch (e) {}
     var title = m.title || '', artist = m.artist || '';
     if (!title && p.currentSrc) {
       title = decodeURIComponent(p.currentSrc.split('/').pop()).replace(/-\d+\.\w+$/, '');
@@ -256,7 +310,7 @@ class MainActivity : AppCompatActivity() {
     var p = P();
     if (!p) return;
     ['play', 'playing', 'pause', 'ended', 'seeked', 'loadedmetadata', 'durationchange'].forEach(function (e) {
-      p.addEventListener(e, function () { setTimeout(report, 100); });
+      p.addEventListener(e, soon);
     });
     p.addEventListener('timeupdate', function () {
       var n = Date.now();
