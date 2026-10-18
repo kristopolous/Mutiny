@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">mutiny</string>
+    <string name="menu_reload">Reload</string>
+    <string name="menu_stop">Stop playback</string>
+    <string name="menu_server">Server</string>
+    <string name="menu_about">About</string>
+    <string name="menu_play">Play</string>
+    <string name="menu_pause">Pause</string>
+    <string name="menu_next">Next</string>
+    <string name="menu_prev">Previous</string>
+    <string name="about_text">mutiny\n\nThe web music explorer, with native background playback.\n\nThe page in this app is mutiny.website running in a WebView; the music itself is played by a native background service, so playback keeps going when the screen is off or the app is backgrounded.</string>
+    <string name="notif_channel">Music</string>
+    <string name="menu_title">mutiny</string>
+    <string name="server_label">Server</string>
+    <string name="server_save">Save</string>
+    <string name="server_default">https://mutiny.website</string>
+</resources>

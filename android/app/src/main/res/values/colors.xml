@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="mutiny_bg">#000000</color>
+    <color name="mutiny_fg">#ffffff</color>
+    <color name="mutiny_fab_bg">#33202020</color>
+    <color name="ic_launcher_background">#000000</color>
+</resources>
