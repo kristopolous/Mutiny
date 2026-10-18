@@ -5,403 +5,275 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
-import android.net.Uri
-import java.io.File
-import android.util.Log
-import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
+import android.os.PowerManager
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
-import androidx.media.session.MediaButtonReceiver
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Foreground media service.
+ * Foreground media service that keeps the process (and so the WebView that
+ * plays the music) alive in the background.
  *
- * Owns the [NativePlayer] (ExoPlayer + the web's d() state machine) and a
- * [MediaSessionCompat] that hardware media keys (headsets, BT, the lock
- * screen and the notification) drive. It runs as a foreground service of
- * type mediaPlayback, so music keeps playing with the screen off / the app
- * in the background / the WebView frozen — the exact case where the plain
- * web page fails.
+ * It plays nothing itself. The page's <audio> element does; this service
+ * holds the wake/wifi locks while it plays, mirrors its state into a
+ * [MediaSessionCompat] (notification, lock screen, headset/BT keys) and
+ * forwards those controls back into the page through [controller].
  */
 class PlayerService : Service() {
 
+    /** Implemented by the activity: runs the action inside the page. */
+    interface Controller {
+        fun action(name: String)
+        fun seek(ms: Long)
+    }
+
     companion object {
-        private const val TAG = "PlayerService"
         const val ACTION_STOP = "net.mutiny.app.ACTION_STOP"
         const val NOTIF_CHANNEL = "mutiny_music"
         const val NOTIF_ID = 42
 
         @Volatile var instance: PlayerService? = null
 
-        /** Start (or restart) the service. */
         fun start(ctx: Context) {
             ContextCompat.startForegroundService(ctx, Intent(ctx, PlayerService::class.java))
         }
 
-        /** Toggle play/pause, starting the service when it is not running. */
-        fun toggle(ctx: Context) {
-            val s = instance
-            if (s != null) {
-                if (s.isPlaying()) s.pause() else s.play()
-            } else {
-                start(ctx)
-            }
-        }
-
-        /** Stop playback and the service. */
         fun stop(ctx: Context) {
             ctx.startService(Intent(ctx, PlayerService::class.java).setAction(ACTION_STOP))
         }
     }
 
+    var controller: Controller? = null
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private lateinit var api: MutinyApi
-    private lateinit var player: NativePlayer
     private lateinit var session: MediaSessionCompat
+    private lateinit var wakeLock: PowerManager.WakeLock
+    private lateinit var wifiLock: WifiManager.WifiLock
     private var sessionActivity: PendingIntent? = null
-    private var artworkJob: Job? = null
-    private var lastPersist = 0L
-    private var lastNav = 0L
 
-    /** The activity registers this to keep the WebView UI in sync. */
-    @Volatile var trackListener: ((Track, ReleaseState) -> Unit)? = null
-
-    private val ticker: Handler = Handler(Looper.getMainLooper()) {
-        tick()
-        ticker.sendEmptyMessageDelayed(0, 1000)
-    }
-
-    private val binder = object : Binder() {
-        val service: PlayerService get() = this@PlayerService
-    }
-
-    // ------------------------------------------------------------------
-    // service lifecycle
-    // ------------------------------------------------------------------
+    private var playing = false
+    private var title = ""
+    private var artist = ""
+    private var album = ""
+    private var duration = 0L
+    private var artUrl = ""
+    private var art: Bitmap? = null
+    private var artJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        api = MutinyApi(Prefs.base(this))
-        player = NativePlayer(this, api, playerListener)
-        createSession()
-        ensureChannel()
-        ticker.sendEmptyMessageDelayed(0, 1000)
-        // resume after a process death (a mediaPlayback FGS is restartable)
-        val json = Prefs.resume(this)
-        if (json.isNotEmpty()) {
-            try {
-                player.restore(JSONObject(json))
-                Log.d(TAG, "restored playback from snapshot")
-            } catch (e: Exception) {
-                Log.w(TAG, "restore failed: $e")
-            }
+        val pm = getSystemService(PowerManager::class.java)
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mutiny:play").apply {
+            setReferenceCounted(false)
         }
+        @Suppress("DEPRECATION")
+        wifiLock = applicationContext.getSystemService(WifiManager::class.java)
+            .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "mutiny:play").apply {
+                setReferenceCounted(false)
+            }
+        sessionActivity = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        session = MediaSessionCompat(this, "mutiny").apply {
+            setSessionActivity(sessionActivity!!)
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay() = act("play")
+                override fun onPause() = act("pause")
+                override fun onSkipToNext() = act("nexttrack")
+                override fun onSkipToPrevious() = act("previoustrack")
+                override fun onStop() = act("pause")
+                override fun onSeekTo(pos: Long) {
+                    this@PlayerService.controller?.seek(pos)
+                }
+            })
+            isActive = true
+        }
+        ensureChannel()
     }
 
-    override fun onBind(intent: Intent): IBinder? = binder
+    override fun onBind(intent: Intent): IBinder = Binder()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            stopPlayback()
+            act("pause")
+            releaseLocks()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
             return START_NOT_STICKY
         }
-        // always a foreground service while we're alive
-        val notif = notification()
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            startForeground(NOTIF_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         } else {
-            startForeground(NOTIF_ID, notif)
+            startForeground(NOTIF_ID, notification())
         }
-        return START_STICKY
+        // without the page there is nothing to play; don't come back alone
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "onDestroy")
-        ticker.removeCallbacksAndMessages(null)
-        player.release()
+        releaseLocks()
         session.release()
         scope.cancel()
         if (instance === this) instance = null
         super.onDestroy()
     }
 
-    /** The user closed the task; keep playing. */
-    override fun onTaskRemoved(rootIntent: Intent?) = Unit
+    fun act(name: String) {
+        controller?.action(name)
+    }
 
-    // ------------------------------------------------------------------
-    // media session
-    // ------------------------------------------------------------------
+    fun isPlaying(): Boolean = playing
 
-    private fun createSession() {
-        val cb = object : MediaSessionCompat.Callback() {
-            override fun onPlay() = play()
-            override fun onPause() = pause()
-            override fun onSkipToNext() = next()
-            override fun onSkipToPrevious() = prev()
-            override fun onStop() = stopPlayback()
-            override fun onSeekTo(pos: Long) = player.seekTo(pos)
-            override fun onFastForward() = player.seekTo(player.positionMs() + 10_000)
-            override fun onRewind() = player.seekTo(player.positionMs() - 10_000)
+    /** The page's <audio> changed (see MainActivity.HOOK). */
+    fun onWebState(s: JSONObject) {
+        playing = s.optBoolean("playing")
+        val pos = s.optLong("pos")
+        val t = s.optString("title")
+        val a = s.optString("artist")
+        val al = s.optString("album")
+        val dur = s.optLong("dur")
+        val newArt = s.optString("art")
+        val metaChanged = t != title || a != artist || al != album || dur != duration
+        title = t
+        artist = a
+        album = al
+        duration = dur
+        if (newArt != artUrl) {
+            artUrl = newArt
+            art = null
+            loadArt(newArt)
         }
-        sessionActivity = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        if (metaChanged) session.setMetadata(meta())
+        session.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setState(
+                    if (playing) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
+                    pos,
+                    if (playing) 1f else 0f,
+                )
+                .setActions(
+                    PlaybackStateCompat.ACTION_PLAY or
+                        PlaybackStateCompat.ACTION_PAUSE or
+                        PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                        PlaybackStateCompat.ACTION_SEEK_TO
+                )
+                .build()
         )
-        // pass null for the 4th arg: the library then derives the media-button
-        // broadcast intent from the receiver component above. Passing an
-        // activity PendingIntent there makes the platform reject the session.
-        session = MediaSessionCompat(
-            this,
-            "mutiny",
-            ComponentName(this, MediaButtonReceiver::class.java),
-            null,
-        )
-        session.setSessionActivity(sessionActivity!!)
-        session.setCallback(cb)
-        session.setActive(true)
-        session.setPlaybackState(basePlaybackState(PlaybackStateCompat.STATE_STOPPED, 0L))
-    }
-
-    private fun basePlaybackState(state: Int, pos: Long): PlaybackStateCompat =
-        PlaybackStateCompat.Builder()
-            .setState(state, pos, 0f)
-            .setActions(
-                PlaybackStateCompat.ACTION_PLAY or
-                    PlaybackStateCompat.ACTION_PAUSE or
-                    PlaybackStateCompat.ACTION_PLAY_PAUSE or
-                    PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                    PlaybackStateCompat.ACTION_STOP or
-                    PlaybackStateCompat.ACTION_SEEK_TO or
-                    PlaybackStateCompat.ACTION_FAST_FORWARD or
-                    PlaybackStateCompat.ACTION_REWIND
-            )
-            .build()
-
-    private fun notification(): Notification {
-        val builder = NotificationCompat.Builder(this, NOTIF_CHANNEL)
-            .setSmallIcon(R.drawable.ic_music_note)
-            .setContentIntent(sessionActivity ?: PendingIntent.getActivity(
-                this, 0,
-                Intent(this, MainActivity::class.java),
-                PendingIntent.FLAG_IMMUTABLE,
-            ))
-            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setOnlyAlertOnce(true)
-            .setOngoing(false)
-        return builder
-            .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle(builder)
-                    .setMediaSession(session.sessionToken)
-                    .setShowCancelButton(false)
-            )
-            .build()
-    }
-
-    // ------------------------------------------------------------------
-    // native player callbacks
-    // ------------------------------------------------------------------
-
-    private val playerListener = object : NativePlayer.Listener {
-        override fun onTrackChanged(track: Track, state: ReleaseState) {
-            curTrack = track
-            curState = state
-            // a new release clears stale art until its own art loads
-            val release = track.release.ifBlank { state.release }
-            if (artForRelease != release) {
-                artForRelease = release
-                artBitmap = null
+        if (playing) {
+            if (!wakeLock.isHeld) wakeLock.acquire()
+            if (!wifiLock.isHeld) wifiLock.acquire()
+        } else {
+            // a paused page keeps its locks briefly: the page pauses between
+            // tracks while it fetches the next one
+            scope.launch {
+                kotlinx.coroutines.delay(30_000)
+                if (!playing) releaseLocks()
             }
-            session.setMetadata(buildMeta(track, state, release))
-            session.setPlaybackState(
-                basePlaybackState(
-                    if (player.isPlaying) PlaybackStateCompat.STATE_PLAYING
-                    else PlaybackStateCompat.STATE_PAUSED,
-                    player.positionMs(),
-                )
-            )
-            persist()
-            loadArtwork(track, release)
-            trackListener?.invoke(track, state)
         }
-
-        override fun onPlayStateChanged(playing: Boolean) {
-            session.setPlaybackState(
-                basePlaybackState(
-                    if (playing) PlaybackStateCompat.STATE_PLAYING
-                    else PlaybackStateCompat.STATE_PAUSED,
-                    player.positionMs(),
-                )
-            )
-            persist()
-        }
-
-        override fun onTrackEnded() = Unit
+        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification())
     }
 
-    // metadata is rebuilt from scratch (never mutated) so old artwork from a
-    // previous release can never leak into the next one
-    private var curTrack: Track? = null
-    private var curState: ReleaseState? = null
-    private var artForRelease: String? = null
-    private var artBitmap: android.graphics.Bitmap? = null
+    private fun releaseLocks() {
+        if (wakeLock.isHeld) wakeLock.release()
+        if (wifiLock.isHeld) wifiLock.release()
+    }
 
-    private fun buildMeta(
-        track: Track,
-        state: ReleaseState,
-        release: String,
-    ): MediaMetadataCompat {
-        val (artist, title) = splitTrack(track.track)
-        val album = release.replace(Regex("-"), " ")
+    private fun meta(): MediaMetadataCompat {
         val b = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album)
-            .putLong(MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER, (track.id + 1).toLong())
-            .putLong(MediaMetadataCompat.METADATA_KEY_NUM_TRACKS, state.tracks.size.toLong())
-        val bmp = if (artForRelease == release) artBitmap else null
-        if (bmp != null) b.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bmp)
+        if (duration > 0) b.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
+        art?.let { b.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) }
         return b.build()
     }
 
-    /** Fetch the release's album-art.jpg (optional) for the notification. */
-    private fun loadArtwork(track: Track, release: String) {
-        val base = Prefs.base(this)
-        val dir = track.path.substringBeforeLast('/')
-        if (dir.isBlank() || release.isBlank()) return
-        val artUrl = "$base$dir/album-art.jpg"
-        artworkJob?.cancel()
-        artworkJob = scope.launch(Dispatchers.IO) {
+    private fun loadArt(url: String) {
+        artJob?.cancel()
+        if (url.isBlank()) return
+        artJob = scope.launch {
             val bmp = try {
-                Artwork.load(this@PlayerService, artUrl)
+                Artwork.load(this@PlayerService, url)
             } catch (e: Exception) {
-                Log.w(TAG, "artwork failed: $e")
                 null
             }
-            if (bmp != null && artForRelease == release) {
-                artBitmap = bmp
-                withContext(Dispatchers.Main) {
-                    val t = curTrack
-                    val s = curState
-                    if (t != null && s != null) {
-                        session.setMetadata(buildMeta(t, s, release))
-                    }
-                }
+            if (bmp != null && url == artUrl) {
+                art = bmp
+                session.setMetadata(meta())
+                getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification())
             }
         }
     }
 
-    // ------------------------------------------------------------------
-    // ticker / persistence
-    // ------------------------------------------------------------------
-
-    private fun tick() {
-        if (!player.started) return
-        val state = if (player.isPlaying) PlaybackStateCompat.STATE_PLAYING
-        else PlaybackStateCompat.STATE_PAUSED
-        session.setPlaybackState(basePlaybackState(state, player.positionMs()))
-        val now = System.currentTimeMillis()
-        if (now - lastPersist > 10_000) persist()
+    private fun notification(): Notification {
+        val builder = NotificationCompat.Builder(this, NOTIF_CHANNEL)
+            .setSmallIcon(R.drawable.ic_music_note)
+            .setContentTitle(title.ifBlank { getString(R.string.app_name) })
+            .setContentText(artist)
+            .setLargeIcon(art)
+            .setContentIntent(sessionActivity)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOnlyAlertOnce(true)
+            .addAction(R.drawable.ic_skip_previous, getString(R.string.menu_prev), button(PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS))
+            .addAction(
+                if (playing) R.drawable.ic_pause else R.drawable.ic_play,
+                getString(if (playing) R.string.menu_pause else R.string.menu_play),
+                button(PlaybackStateCompat.ACTION_PLAY_PAUSE),
+            )
+            .addAction(R.drawable.ic_skip_next, getString(R.string.menu_next), button(PlaybackStateCompat.ACTION_SKIP_TO_NEXT))
+        return builder
+            .setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(session.sessionToken)
+                    .setShowActionsInCompactView(0, 1, 2)
+            )
+            .build()
     }
 
-    private fun persist() {
-        if (!player.started) return
-        Prefs.setResume(this, player.snapshot().toString())
-        lastPersist = System.currentTimeMillis()
-    }
-
-    // ------------------------------------------------------------------
-    // controls
-    // ------------------------------------------------------------------
-
-    fun play() = player.play()
-
-    fun pause() = player.pause()
-
-    /** Media keys can arrive both as a broadcast (MediaButtonReceiver) and a
-     *  key event; coalesce rapid duplicates. */
-    fun next() {
-        val n = System.currentTimeMillis()
-        if (n - lastNav < 400) return
-        lastNav = n
-        player.next()
-    }
-
-    fun prev() {
-        val n = System.currentTimeMillis()
-        if (n - lastNav < 400) return
-        lastNav = n
-        player.prev()
-    }
-
-    fun isPlaying(): Boolean = player.isPlaying
-
-    fun currentHash(): String = player.hash()
-
-    /** The web page picked a track: adopt it and play the real stream. */
-    fun onWebTrack(url: String, snap: JSONObject) {
-        player.onWebTrack(url, snap)
-    }
-
-    /** Switch the server (menu > server): re-point the api at the new base. */
-    fun reconfigure(base: String) {
-        player.stop()
-        player.api = MutinyApi(base)
-        Prefs.setResume(this, "")
-        Prefs.setHash(this, "")
-    }
-
-    /** Debug: play a bundled local tone (no network) to test the player pipeline. */
-    fun playDebugTone() {
-        try {
-            val dest = File(filesDir, "test_tone.wav")
-            if (!dest.exists() || dest.length() == 0L) {
-                assets.open("test_tone.wav").use { input ->
-                    dest.outputStream().use { output -> input.copyTo(output) }
-                }
-            }
-            val uri = Uri.fromFile(dest).toString()
-            Log.e(TAG, "playDebugTone: $uri (${dest.length()} bytes)")
-            player.playLocal(uri)
-        } catch (e: Exception) {
-            Log.e(TAG, "playDebugTone failed: $e")
+    /** notification buttons go straight to the session callback */
+    private fun button(action: Long): PendingIntent {
+        val key = when (action) {
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            else -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
         }
+        val i = Intent(this, MediaKeyReceiver::class.java)
+            .putExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, key))
+        return PendingIntent.getBroadcast(this, key, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    /** Debug: dump the live ExoPlayer state to logcat. */
-    fun dumpDebugState() {
-        player.dumpState()
-    }
-
-    /** Stop playback, clear the resume snapshot, and stop the service. */
-    fun stopPlayback() {
-        Log.d(TAG, "stopPlayback")
-        player.stop()
-        Prefs.setResume(this, "")
-        session.setPlaybackState(basePlaybackState(PlaybackStateCompat.STATE_STOPPED, 0L))
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+    /** a key from the notification buttons */
+    fun onKey(code: Int) {
+        when (code) {
+            android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> act("nexttrack")
+            android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> act("previoustrack")
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> act("play")
+            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> act("pause")
+            else -> act(if (playing) "pause" else "play")
+        }
     }
 
     private fun ensureChannel() {
@@ -417,29 +289,5 @@ class PlayerService : Service() {
                 )
             }
         }
-    }
-
-    /** Debug: play the tone through a brand-new standalone ExoPlayer. */
-    fun rawTone() {
-        try {
-            val dest = File(filesDir, "test_tone.wav")
-            if (!dest.exists() || dest.length() == 0L) {
-                assets.open("test_tone.wav").use { input ->
-                    dest.outputStream().use { output -> input.copyTo(output) }
-                }
-            }
-            val uri = Uri.fromFile(dest).toString()
-            Log.e(TAG, "rawTone: $uri")
-            player.rawTest(uri)
-        } catch (e: Exception) {
-            Log.e(TAG, "rawTone failed: $e")
-        }
-    }
-
-    /** web track names are "artist - title-<bandcamp id>"; drop the id for display. */
-    private fun splitTrack(s: String): Pair<String, String> {
-        val i = s.indexOf(" - ")
-        val (a, t) = if (i > 0) s.substring(0, i) to s.substring(i + 3) else s to s
-        return a to t.replace(Regex("-(\\d+)$"), "")
     }
 }

@@ -8,7 +8,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.MEDIA_BUTTON" />
 
     <application
         android:allowBackup="true"
@@ -35,24 +34,9 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- legacy hardware media key routing (headsets, BT devices) -->
         <receiver
-            android:name="androidx.media.session.MediaButtonReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
-            </intent-filter>
-        </receiver>
+            android:name=".MediaKeyReceiver"
+            android:exported="false" />
 
-        <!-- debug: play a local tone / dump state to isolate player vs network issues -->
-        <receiver
-            android:name=".DebugPlayReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="net.mutiny.app.DEBUG_PLAY" />
-                <action android:name="net.mutiny.app.DEBUG_STATE" />
-                <action android:name="net.mutiny.app.DEBUG_RAW" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>
