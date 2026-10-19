@@ -10,13 +10,17 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.text.InputType
 import android.view.KeyEvent
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.view.View
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.PopupMenu
 import androidx.activity.OnBackPressedCallback
@@ -190,24 +194,51 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun serverDialog() {
+        val dp = resources.displayMetrics.density
+        // keep the EditText's own padding: overriding it puts the underline
+        // through the text. Spacing goes on the container instead.
         val input = EditText(this).apply {
-            setPadding(48, 24, 48, 0)
             setText(Prefs.base(this@MainActivity))
-            setHint(R.string.server_default)
+            setHint(R.string.server_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            isSingleLine = true
+            setSelectAllOnFocus(true)
         }
-        AlertDialog.Builder(this)
+        val box = FrameLayout(this).apply {
+            val h = (24 * dp).toInt()
+            setPadding(h, (8 * dp).toInt(), h, 0)
+            addView(input)
+        }
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.menu_server)
-            .setView(input)
-            .setPositiveButton(R.string.server_save) { _, _ ->
-                val url = input.text.toString().trim()
-                if (url.isNotEmpty() && url.trimEnd('/') != Prefs.base(this)) {
-                    Prefs.setBase(this, url)
-                    Prefs.setHash(this, "")
-                    loadPage()
-                }
-            }
+            .setMessage(R.string.server_help)
+            .setView(box)
+            .setPositiveButton(R.string.server_save) { _, _ -> saveServer(input.text.toString()) }
+            .setNeutralButton(R.string.server_reset) { _, _ -> saveServer(Prefs.DEFAULT_BASE) }
             .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            .create()
+        input.setOnEditorActionListener { _, id, _ ->
+            if (id == EditorInfo.IME_ACTION_DONE) {
+                saveServer(input.text.toString())
+                dialog.dismiss()
+                true
+            } else false
+        }
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        input.requestFocus()
+    }
+
+    private fun saveServer(raw: String) {
+        var url = raw.trim().trimEnd('/')
+        if (url.isEmpty()) return
+        // "100.64.0.5:8080" -> "http://100.64.0.5:8080"
+        if (!url.contains("://")) url = "http://$url"
+        if (url == Prefs.base(this)) return
+        Prefs.setBase(this, url)
+        Prefs.setHash(this, "")
+        loadPage()
     }
 
     private fun aboutDialog() {

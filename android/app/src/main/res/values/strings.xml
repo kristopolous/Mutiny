@@ -14,5 +14,7 @@
     <string name="menu_title">mutiny</string>
     <string name="server_label">Server</string>
     <string name="server_save">Save</string>
-    <string name="server_default">https://mutiny.website</string>
+    <string name="server_hint">https://mutiny.website</string>
+    <string name="server_help">Base URL of the mutiny instance to use. Plain http and LAN / tailscale addresses work, e.g. http://100.64.0.5:8080</string>
+    <string name="server_reset">Default</string>
 </resources>
