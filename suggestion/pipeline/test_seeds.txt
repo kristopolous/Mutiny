@@ -1,0 +1,19 @@
+# Test-suite seed battery (one Bandcamp release URL per line, # = comment).
+# Mix of: fresh Discogs-tracked seeds, a fully-cached seed, and a seed that is
+# NOT in Discogs (exercises the Bandcamp-native fallback).
+
+# -- Oráculo Records catalog (fresh, Discogs-tracked) --
+https://oraculorecords.bandcamp.com/album/lost-in-black
+https://oraculorecords.bandcamp.com/album/occulimus
+https://oraculorecords.bandcamp.com/album/oniromancia-completa
+https://oraculorecords.bandcamp.com/album/in-line
+https://oraculorecords.bandcamp.com/album/world-of-lies
+https://oraculorecords.bandcamp.com/album/das-beste-aus-hagen-redux
+https://oraculorecords.bandcamp.com/album/in-the-garden
+https://oraculorecords.bandcamp.com/album/vox-flora-vox-fauna
+
+# -- known-good fully-cached path --
+https://detund.bandcamp.com/album/cycles
+
+# -- not in Discogs -> Bandcamp-native fallback path --
+https://wernerkarloff.bandcamp.com/album/atemporal-ep-2
