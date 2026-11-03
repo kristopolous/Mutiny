@@ -1,227 +1,173 @@
-# Music Explorer - Discogs Release Recommender
+# Music Explorer — Bandcamp-first release recommender
 
-Graph-based music recommendation system using Discogs data and Neo4j.
+Bandcamp release URLs in → ranked music suggestions out. Discogs is the
+graph backbone (who worked on what, on which label); Bandcamp is the
+ground truth for what you can actually get. Every suggestion carries
+artist / label / year and a clickable Bandcamp player.
 
 ## Core invariant
 
 **Popularity is worth exactly 0.** Not a small weight, not a tiebreaker,
 not a "signal" — zero. No recommendation may be influenced by how many
-people own, bought, streamed, or listened to a release. The only signals
-are structural: who worked on what, on which label. (The IDF weighting
-rewards *rarity* of shared features — the opposite direction of popularity —
-and is the only thing that differentiates scores.)
+people own, bought, streamed, or fan-out a release. The only signals are
+structural: shared people and labels, scored by the *rarity* of the
+shared feature (IDF within the traversal — the opposite direction of
+popularity).
+
+Why it's enforced, not just preferred: popularity weights compound
+multiplicatively across a depth-N walk ((1+ε)^N), so every neighborhood
+converges on the same mega-label attractors. Structural affinity alone
+keeps depth meaningful.
 
 Consequences, enforced in code:
-- Bandcamp's "N fans also own" co-ownership counts are parsed nowhere and
-  never used for ranking or display (`pipeline/bc_rec.py` keeps Bandcamp's
-  own page order, no re-ranking).
-- Do not add listener/owner/sales/stream counts, "trending", or any
-  aggregate human-attention metric as a ranking input. If a future change
-  needs a tiebreaker, use something structural (e.g. release year, depth),
-  never popularity.
+- Bandcamp "N fans also own" counts are parsed nowhere and never used
+  (`bc_rec.py` keeps Bandcamp's own page order).
+- No listener/owner/sales/stream/"trending" metric may enter ranking.
+  Tiebreakers must be structural (year, depth), never popularity.
+- Flood control is inverse weighting *within the traversal* (a feature
+  seen 500× self-weights ~0.16 vs ~1.4 for a rare one) plus hard caps
+  (`max_pages_per_label`, `max_releases_per_artist`) — never a global
+  "is this a big label" lookup, which would be popularity in disguise.
 
-## Overview
+## The model: your collection IS the crawl query
 
-Finds similar releases by traversing connections between:
-- Artists and contributors (producers, engineers, mastering, artwork)
-- Labels
-- Similar artists
+Not a saved list — the search parameters. State lives in `.data/`:
 
-Uses IDF-style weighting to surface long-tail discoveries over popular releases.
+| file | role |
+|---|---|
+| `collection.json` | the parameters (Bandcamp URLs). Seeds the crawl. |
+| `ratings.json` | `3`/`4`/`5` = that seed's vote multiplier (unrated = 1) |
+| `purged.json` | `P` = veto: release blocked everywhere; if it's a collection member it also becomes a **negative** parameter (its neighborhood vote is subtracted) |
 
-## Requirements
+Rating scale is exactly **P 3 4 5** — one state per release. P is a
+release-level veto, not neighborhood poison (hating one record says
+nothing about its label).
 
-- Python 3.12+
-- Neo4j (bolt://localhost:7687)
-- Redis (localhost:6379)
-- PostgreSQL 16+ (for local Discogs XML import and Bandcamp correlation)
-- Discogs API token
+Every click on the live page edits the query and re-runs the crawl:
+rate a collection member, add/remove a parameter → re-crawl. Rate a
+plain suggestion 3/4/5 → banked only (it's not a parameter yet); P
+always re-crawls (global veto).
 
-## Setup
+### Anti-feedback-loop
 
-### 1. Start infrastructure servers
+Serve 90% of type A, watch what gets rated, conclude "they love type A"
+— the classic recommender spiral. Cut at three places:
 
-```bash
-./install_deps.sh
-cp dot_env.example .env
-# Edit .env with your Discogs token
-./start_servers.sh
-source .venv/bin/activate
+1. **Ratings never auto-promote.** A 5 on a suggestion changes nothing
+   until *you* add it to the collection.
+2. **Exploration cap** (`--max-per-label`, default 3): at most N picks
+   from any label/storefront, so the menu is always broad and a rating
+   is a choice among alternatives. Structural (label identity), not
+   popularity.
+3. **Correlated parameters share a vote.** N parameters from the same
+   label = one sample of that label: each gets weight/N. Three Oráculo
+   records don't triple-vote for Oráculo-land.
+
+## How a suggestion is made
+
+```
+collection (params, weighted P/3/4/5)
+  └─ correlate to Discogs release IDs (bc.py + redis bc2dg)
+       └─ BFS depth 1-2: shared people → their releases; shared labels → rosters
+            └─ per-seed IDF: score = rarity of the shared connection
+                 └─ fuse per-seed rankings: weighted reciprocal rank fusion
+                      (consensus across params compounds; P params subtract)
+                           └─ keep only releases with a Bandcamp home,
+                             minus vetoes, minus params, cap 3/label
 ```
 
-### 2. PostgreSQL (optional, needed for local correlation and Discogs XML import)
+Multi-seed fusion is RRF (rank-based, scale-free) — pooled IDF score
+summing is not comparable across neighborhoods and one seed used to win
+everything. Seeds that aren't in Discogs fall back to Bandcamp-native
+recommendations (`/api/mobile/4/recommendations`), but that path is a
+fallback only; the graph is the product.
 
-Run via Docker (or use a local install):
+## Quickstart
 
-```bash
-docker run -d -p 5432:5432 \
-  -e POSTGRES_PASSWORD=password \
-  --name postgres \
-  postgres:16
-
-export DATABASE_URL="postgresql://postgres:password@localhost/discogs"
-createdb -h localhost -U postgres discogs
-```
-
-Add `DATABASE_URL` to `.env` so scripts pick it up automatically.
-
-### 3. Import Discogs XML dump (one-time, ~5 hours)
-
-Download the **releases** data dump using the helper script (only `discogs_YYYYMMDD_releases.xml.gz` is needed — artists and labels are extracted from the release records):
+Requirements: Python 3.12+, Redis (localhost:6379), lightpanda
+(`~/.local/bin/lightpanda`, used to render Bandcamp search), and the
+local Discogs DB (`.data/discogs.db`, ~19.5M releases, rebuildable from
+the XML dump — see Data below).
 
 ```bash
-./local/download-discogs-dump.sh
+python3 -m venv .venv && .venv/bin/pip install redis requests
+.venv/bin/python pipeline/resolver.py &        # Bandcamp queue worker
+.venv/bin/python pipeline/browse_server.py 8080  # live page + query API
 ```
 
-This saves the file as `discogs_YYYYMMDD_releases.xml.gz` and symlinks it to
-`discogs_releases.xml.gz`. Running it again when the DB is already populated
-will warn you and exit.
+Open `http://<host>:8080/` — that's `live.html`, generated from the
+current collection. Paging is client-side (9/page, 3 per row); players
+are Bandcamp's own embeds (the embed *is* the artwork window; tracklist
+on, height fitted per album).
 
-Then import:
+CLI:
 
 ```bash
-# Extract (the gz file contains a single XML)
-gunzip discogs_releases.xml.gz
+# suggestions from URLs (graph path; queues Bandcamp lookups as needed)
+.venv/bin/python pipeline/suggest.py -n 24 https://detund.bandcamp.com/album/multiverse ...
 
-# Import into PostgreSQL
-./local/discogs-xml-to-pg.py discogs_releases.xml
+# options: --all (include Discogs-only finds), --wait-seconds N (default 180),
+# --no-search (cache only), --max-per-label N (default 3, 0 = off),
+# -d DEPTH, -v (shows seed weights / negative params / purge blocks)
+
+# regenerate the live page from the collection
+.venv/bin/python pipeline/browse.py --live
+.venv/bin/python pipeline/browse.py URL...      # one-off page
+.venv/bin/python pipeline/browse.py --import FILE   # merge exported ratings
 ```
 
-This imports ~18M releases into PostgreSQL, creating tables for releases, artists,
-tracks, and their relationships. Only needed if you want to correlate Bandcamp
-releases offline instead of using the Discogs API.
+## Bandcamp resolution (be polite)
 
-Without PostgreSQL, Bandcamp correlation uses the Discogs API (`correlate/correlate.py`),
-which is slower (~9s per release) but doesn't need a local database.
+A suggestion only appears by default if it resolves to a Bandcamp URL.
+Resolution order: redis correlation cache → reverse cache
+(`bc:reverse:<artist>|<title>`) → **queued to the resolver**, which runs
+one Bandcamp search every ~20s (lightpanda renders the Client
+Challenge) and caches hits (7d) / misses (1h). Never hammer search; the
+queue is the design.
 
-## Usage
+## Tests
 
-**Suggest from Bandcamp URLs (recommended — no PostgreSQL needed):**
 ```bash
-# Give it Bandcamp release URLs; it correlates them to Discogs, traverses the
-# graph, and returns ranked suggestions (with Bandcamp URLs when known).
-./pipeline/suggest.py -n 10 \
-  https://detund.bandcamp.com/album/multiverse \
-  https://detund.bandcamp.com/album/litmus
-
-# Raw JSON (machine-readable):
-./pipeline/traverse_and_weight.py -n 10 \
-  https://detund.bandcamp.com/album/multiverse
+.venv/bin/python pipeline/test_suite.py --smoke   # seeds in pipeline/test_seeds.txt
 ```
 
-Correlation is cached in Redis, so the first run for a URL takes a few seconds
-(Bandcamp page fetch + Discogs search) and later runs are instant. Set
-`MUTINY_BASE=<music tree>` to prefer local `page.html` files over the network.
+Asserts each seed produces suggestions with working Bandcamp URLs and
+correct modes. `pipeline/multiseed_eval.py` is the harness that
+compared pooled-sum vs RRF fusion.
 
-**Bandcamp URL resolution (the resolver worker):**
+## Data & state (relocatable)
 
-Suggestions only show up in the default output if they resolve to a Bandcamp
-URL (things you can actually get). Resolution order:
+Everything lives under `.data/` — move the directory, the project moves.
 
-1. Redis correlation cache (instant, from your scraped tree / prior runs)
-2. Reverse cache `bc:reverse:<artist>|<title>` (instant, populated by the resolver)
-3. Queued to the **resolver worker**, which searches Bandcamp's own search
-   page at a fixed polite rate (one search every 20s by default) using
-   lightpanda to render the page, and caches the result (7 days) or a
-   short-lived miss (1 hour).
+- `discogs.db` — SQLite backbone (`local_db.py` queries it; import with
+  `local/discogs-xml-to-db-fast.py <releases.xml> --db .data/discogs.db`,
+  dump via `local/download-discogs-dump.sh`, ~5h import)
+- `collection.json` / `ratings.json` / `purged.json` — the query
+- `browse/live.html` — served page; `bc-art-ids.json` — player ids/artwork
+- redis: `bc2dg` (bandcamp→discogs), `bc:reverse:*`, `bc:resolve:queue|pending`
+- `pipeline/data/` — resolver pid + Bandcamp cookie jar (gitignored)
 
-Start the worker once (e.g. in tmux or via systemd):
-```bash
-python3 pipeline/resolver.py                 # runs forever, one search / 20s
-python3 pipeline/resolver.py --interval 10   # faster (don't)
-python3 pipeline/resolver.py --once          # drain one job and exit
-```
-`suggest.py` warns if the worker isn't running (links come from cache only).
+## Files
 
-**suggest.py options:**
-- `--all` — also include suggestions that have no Bandcamp URL (Discogs-only)
-- `--wait-seconds N` — max seconds to wait for queued resolutions (default 180)
-- `--no-search` — cache only, never queue searches
+**pipeline/**
+- `suggest.py` — the query engine: correlate → traverse → IDF → RRF →
+  Bandcamp filter → caps. Reads ratings/purged/collection.
+- `browse.py` — HTML page builder (collection section = params with
+  weight badges; suggestions paged; P/3/4/5 widgets)
+- `browse_server.py` — serves the page; `POST /rate`, `POST /collection`
+  edit the query and re-run the crawl when the query changed
+- `resolver.py` — queued Bandcamp search worker (lightpanda)
+- `traverse_and_weight.py` — BFS + IDF + RRF core
+- `bc.py` / `bc_rec.py` — correlation + Bandcamp-native recommendations
+- `test_suite.py`, `multiseed_eval.py` — tests/evals
+- `local_db.py` (project root) — SQLite query layer
 
-**Suggest from Discogs URLs directly:**
-```bash
-./pipeline/traverse_and_weight.py -n 10 \
-  https://www.discogs.com/release/24262334 \
-  https://www.discogs.com/release/9751144
-```
+**Legacy** (Neo4j/Postgres era, kept for reference, not used by the
+pipeline): `ingest.py`, `graph.py`, `aggregate.py`, `similar.py`,
+`pipeline.py`, `local/*-pg*`, `correlate/`.
 
-**Prefer your `.listen_done` history as seeds (experimental):**
-```bash
-# Build a prefs file: <label>/<release> __rating_5  (or __purge, __rating_3/4)
-./pipeline/pipeline.py -f prefs.txt -d 2 -n 20
-```
-Note: `pipeline.py` only resolves seeds that are already in the Redis
-correlation cache; run the correlate step first to populate it.
+## Depth levels
 
-**Suggest from Discogs URLs directly:**
-```bash
-# Correlate a single Bandcamp release to Discogs (prints the Discogs URL)
-./pipeline/bc.py https://detund.bandcamp.com/album/multiverse
-```
-
-**Step-by-step (Discogs graph path):**
-
-1. Import Discogs XML dump (one-time, ~5 hours):
-```bash
-./local/discogs-xml-to-pg.py discogs_$(date +%Y%m%d)_releases.xml
-```
-
-2. Correlate Bandcamp pages to Discogs IDs:
-```bash
-find <bandcamp-dir> -name page.html | ./local/correlate-local-pg.py -v
-```
-
-3. Traverse and weight from seed releases:
-```bash
-./pipeline/traverse_and_weight.py -f releases.txt -d 2
-```
-
-4. Find similar releases for a single Discogs URL:
-```bash
-./pipeline/similar.py https://www.discogs.com/release/12345
-```
-
-## Architecture
-
-**local/** - Local database import and correlation (no API rate limits):
-- `discogs-xml-to-pg.py` - Import 45GB Discogs XML dump into PostgreSQL (~5 hours for 18M releases)
-- `correlate-local-pg.py` - Match Bandcamp pages to Discogs using local PostgreSQL (sub-second per release)
-- `discogs-xml-to-db.py` - Import Discogs XML into SQLite (legacy, too slow for large datasets)
-- `correlate-local.py` - Match Bandcamp pages using local SQLite (legacy)
-
-**correlate/** - API-based correlation:
-- `correlate.py` - Match Bandcamp pages to Discogs API with Redis caching (~9s per request)
-
-**pipeline/** - Recommendation pipeline:
-- `suggest.py` - CLI wrapper: Bandcamp URLs in → ranked suggestions out
-- `resolver.py` - background worker: resolves (artist, title) → Bandcamp URL via Bandcamp search at a fixed rate
-- `bc.py` - Bandcamp URL ↔ Discogs release correlation (Redis cache, local
-  page.html, or Bandcamp page fetch + Discogs search); reverse lookup for
-  results
-- `traverse_and_weight.py` - Core: correlate sources → BFS traverse → IDF
-  weight → dedupe → optional Bandcamp annotation
-- `pipeline.py` - Preferences-file (.listen_done style) pipeline (uses
-  cached correlations only)
-- `aggregate.py` - Multi-release recommender with Adamic-Adar + Jaccard + IDF scoring (Neo4j graph path)
-- `traverse_and_weight.py` - Combined BFS traversal and IDF weighting
-- `traverse.py` - BFS graph traversal from seed releases
-- `weight.py` - IDF weighting for graph features
-- `similar.py` - Find similar releases for a single Discogs URL
-- `rank_feature.py` - Feature ranking utilities
-
-**Root** - Core infrastructure:
-- `ingest.py` - Discogs API client + Neo4j ingestion
-- `graph.py` - Neo4j query interface
-- `lib.py` - Shared utility functions
-- `cache.py` - Redis caching for API responses and correlations
-- `config.py` - Environment configuration and logging
-- `install_deps.sh` - Install Python dependencies
-- `start_servers.sh` - Start Neo4j and Redis servers
-
-## Depth Levels
-
-- `1` - Direct connections only (same artist, shared contributors)
-- `2` - + Label/producer sharing (default)
-- `3` - + Similar artist connections
-
-Higher depths use stricter degree thresholds for long-tail discovery.
+- `1` — direct connections only (shared people)
+- `2` — + label rosters and people-of-people (default)
+- `3` — wider reach; stricter degree thresholds keep it long-tail
