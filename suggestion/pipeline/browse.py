@@ -520,8 +520,8 @@ def main():
     p = argparse.ArgumentParser(description='HTML listening page for a suggestion run')
     p.add_argument('urls', nargs='*', help='seed Bandcamp URL(s)')
     p.add_argument('-n', '--top-n', type=int, default=24)
-    p.add_argument('--page-size', type=int, default=8,
-                   help='suggestions per page (client-side paging)')
+    p.add_argument('--page-size', type=int, default=9,
+                   help='suggestions per page (client-side paging; 3 per row)')
     p.add_argument('-d', '--depth', type=int, default=2)
     p.add_argument('--wait-seconds', type=float, default=180)
     p.add_argument('--all', action='store_true', dest='show_all')

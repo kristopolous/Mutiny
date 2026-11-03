@@ -11,6 +11,7 @@ label, year, and a Bandcamp URL (cache hit, or on-the-fly Bandcamp search).
 import os
 import sys
 import time
+from urllib.parse import urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))  # suggestion/ for ingest/config/cache
@@ -98,6 +99,19 @@ def _warn_no_local_db():
               file=sys.stderr)
 
 
+def _load_collection_urls():
+    """Normalized Bandcamp URLs of collection members (.data/collection.json).
+    A search parameter is never a suggestion - even ones that never
+    correlated to Discogs and so cannot be deduped by release ID."""
+    import json
+    path = os.path.join(os.path.dirname(HERE), '.data', 'collection.json')
+    try:
+        with open(path) as fh:
+            return {_norm_bc(u) for u in json.load(fh)}
+    except (OSError, ValueError):
+        return set()
+
+
 def _load_ratings():
     """User weights (.data/ratings.json): normalized BC URL -> '3'|'4'|'5'.
     These are taste parameters, not popularity - they only ever scale a
@@ -173,6 +187,10 @@ def main():
                         "Default: only show releases available on Bandcamp.")
     p.add_argument('--wait-seconds', type=float, default=180,
                    help='Max seconds to wait for the resolver to find Bandcamp URLs (default 180; 0 = cache only)')
+    p.add_argument('--max-per-label', type=int, default=3,
+                   help='exploration cap: at most N suggestions from any one '
+                        'label/storefront (default 3; 0 = off). Structural - '
+                        'label identity, never popularity.')
     p.add_argument('--no-search', action='store_true',
                    help='Only use the correlation cache; never queue Bandcamp searches')
     args = p.parse_args()
@@ -180,6 +198,7 @@ def main():
     purged_urls = _load_purged()
     purged_norm = {_norm_bc(u) for u in purged_urls}
     purged_rids = _purge_exclusions(purged_urls, verbose=args.verbose)
+    coll_norm = _load_collection_urls()
 
     from traverse_and_weight import (collect_source_ids, traverse, compute_idf_weights,
                                      dedupe_releases, fuse_reciprocal_rank)
@@ -209,14 +228,22 @@ def main():
         from bc_rec import recommend
         items, seen = [], set()
         n_purged = 0
+        store_count = {}
         for u in bc_urls:
             for it in recommend(u, verbose=args.verbose):
                 if it['url'] not in seen:
                     seen.add(it['url'])
                     it['source'] = u
-                    if _norm_bc(it['url']) in purged_norm:
-                        n_purged += 1  # user vetoed this one: never again
+                    if _norm_bc(it['url']) in purged_norm \
+                            or _norm_bc(it['url']) in coll_norm:
+                        n_purged += 1  # vetoed or already a parameter
                         continue
+                    if args.max_per_label > 0:
+                        host = urlsplit(it['url']).netloc
+                        store = host.split('.')[0]
+                        if store_count.get(store, 0) >= args.max_per_label:
+                            continue
+                        store_count[store] = store_count.get(store, 0) + 1
                     items.append(it)
         if n_purged and args.verbose:
             print(f"[purge] excluded {n_purged} purged suggestion(s)", file=sys.stderr)
@@ -280,6 +307,29 @@ def main():
                 negative.add(sid)
             elif n in ratings_map:
                 weights[sid] = ratings_map[n]
+        # Correlated parameters share a vote. Two parameters from the same
+        # label are ONE sample of that label, not two - left unsplit, a
+        # label with several members double-votes for its own neighborhood,
+        # floods the menu, and the user's ratings on that flooded menu get
+        # read as fresh enthusiasm (the recommender feedback loop: serve
+        # roadkill, watch them eat, conclude they love roadkill).
+        seed_lab = {}
+        for sid in source_ids:
+            labs = _fetch_meta(sid).get('labels') or []
+            seed_lab[sid] = labs[0] if labs else ''
+        lab_n = {}
+        for lab in seed_lab.values():
+            if lab:
+                lab_n[lab] = lab_n.get(lab, 0) + 1
+        for sid in source_ids:
+            lab = seed_lab.get(sid)
+            if lab and lab_n.get(lab, 1) > 1:
+                weights[sid] = weights.get(sid, 1.0) / lab_n[lab]
+        if args.verbose:
+            dupes = {l: n for l, n in lab_n.items() if n > 1}
+            if dupes:
+                print(f"[query] correlated params share votes: {dupes}",
+                      file=sys.stderr)
         if args.verbose and (weights or negative):
             print(f"[query] seed weights: {weights} negative: {sorted(negative)}",
                   file=sys.stderr)
@@ -369,23 +419,42 @@ def main():
                 break
             time.sleep(3)
 
-    # Final list, in weight order. Default: only Bandcamp-resolved releases.
+    # Final list, in weight order, with the per-label exploration cap.
+    # Default: only Bandcamp-resolved releases.
+
+    def label_key(rid):
+        labs = (meta_by_rid.get(rid) or {}).get('labels') or []
+        return labs[0] if labs else ''
+
+    lab_count = {}
+
+    def take(r):
+        if args.max_per_label > 0:
+            key = label_key(r['release_id'])
+            if key and lab_count.get(key, 0) >= args.max_per_label:
+                return False
+            if key:
+                lab_count[key] = lab_count.get(key, 0) + 1
+        final.append(r)
+        return True
+
     final = []
     for r in candidates:
         rid = r['release_id']
         if rid in bc_by_rid:
-            if _norm_bc(bc_by_rid[rid]) in purged_norm:
-                continue  # resolved to a URL the user vetoed
-            final.append(r)
-            if args.top_n > 0 and len(final) >= args.top_n:
-                break
+            nurl = _norm_bc(bc_by_rid[rid])
+            if nurl in purged_norm or nurl in coll_norm:
+                continue  # vetoed, or already a search parameter
+            if take(r):
+                if args.top_n > 0 and len(final) >= args.top_n:
+                    break
     if args.show_all:
         have = {r['release_id'] for r in final}
         for r in candidates:
             if r['release_id'] not in have:
-                final.append(r)
-                if args.top_n > 0 and len(final) >= args.top_n:
-                    break
+                if take(r):
+                    if args.top_n > 0 and len(final) >= args.top_n:
+                        break
     if not final:
         print("No suggestions (nothing on Bandcamp resolved yet - re-run later, "
               "the resolver keeps caching in the background).", file=sys.stderr)
