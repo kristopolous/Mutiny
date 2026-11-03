@@ -387,6 +387,24 @@ document.getElementById('hiderated').onchange = e =>
   document.body.classList.toggle('hiderated', e.target.checked);
 paint();
 
+// The server runs the resolver in-process: when queued Bandcamp lookups
+// land and the crawl re-runs, gen changes. Offer an update - never force
+// a reload (playback is sacred). Also keep the queue count live.
+if (location.protocol.startsWith('http')) {
+  let baseGen = null;
+  setInterval(async () => {
+    try {
+      const s = await (await fetch('/status')).json();
+      if (baseGen === null) baseGen = s.gen;
+      if (s.gen !== baseGen)
+        document.getElementById('refreshbtn').style.display = '';
+      document.getElementById('status').textContent =
+        s.queue ? s.queue + ' queued for bandcamp' : '';
+    } catch (e) { /* file:// or server down: stay quiet */ }
+  }, 15000);
+  document.getElementById('refreshbtn').onclick = () => location.reload();
+}
+
 // Suggestions are paged client-side: the crawl already ranked them all.
 const PAGE = %PAGE%;
 let page = 0;
@@ -500,6 +518,7 @@ def build_html(data, cards_html, collection_html, ratings, purged,
     <span>{escape(mode_label)} &middot; {n_with}/{n_total} with player
       &middot; {elapsed:.0f}s{queued_note}</span>
     <span id="status"></span>
+    <button id="refreshbtn" style="display:none">new results &mdash; update</button>
     <label><input type="checkbox" id="hiderated"> hide marked</label>
     <button id="exportbtn">export ratings</button>
   </div>

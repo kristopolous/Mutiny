@@ -90,10 +90,18 @@ local Discogs DB (`.data/discogs.db`, ~19.5M releases, rebuildable from
 the XML dump — see Data below).
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install redis requests
-.venv/bin/python pipeline/resolver.py &        # Bandcamp queue worker
-.venv/bin/python pipeline/browse_server.py 8080  # live page + query API
+python3 -m venv .venv && .venv/bin/pip install redis requests python-dotenv
+.venv/bin/python pipeline/browse_server.py 8080   # everything: page + crawl + resolver
 ```
+
+One process, one experience. `browse_server` serves the page, re-runs the
+crawl when the query changes, and runs Bandcamp URL discovery (the
+resolver queue, one polite search per ~20s via lightpanda) as an
+in-process worker thread — discovering URLs is part of the pipeline, not
+a daemon to babysit. When queued lookups land, the crawl re-runs in the
+background and the page offers a "new results — update" button (never a
+forced reload: playback is sacred). `pipeline/resolver.py` still runs
+standalone (`--once`, `--interval`) if you want it separate.
 
 Open `http://<host>:8080/` — that's `live.html`, generated from the
 current collection. Paging is client-side (9/page, 3 per row); players

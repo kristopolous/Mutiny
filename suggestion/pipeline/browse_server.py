@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-browse_server: live listening page where the collection IS the crawl query.
+browse_server: the whole live experience in one process.
 
 Serves .data/browse/ (GET / -> live.html) and accepts JSON POSTs:
 
     POST /rate        {"url": ..., "value": "P"|"3"|"4"|"5"|""}
     POST /collection  {"url": ..., "add": true|false}
+    GET  /status      {"gen": N, "queue": N}   (page polling)
 
 Every mutation updates .data/{ratings,purged,collection}.json and re-runs
 the suggestion crawl (browse.py --live), so the page you see always reflects
 the current query. One crawl at a time (lock); the client shows a spinner.
+
+Bandcamp URL discovery (the resolver queue, one polite search per ~20s)
+runs IN-PROCESS as a worker thread: discovering URLs is part of the
+pipeline, not a daemon to babysit. When the queue drains and new links
+arrived, the crawl re-runs in the background and the page offers an
+"update" button - never a forced reload (playback is sacred).
 
     ./browse_server.py [port]        (default 8080)
 """
@@ -18,9 +25,12 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE := os.path.dirname(os.path.abspath(__file__)))
+import resolver  # noqa: E402  (Bandcamp discovery = part of the pipeline)
+
 ROOT = os.path.dirname(HERE)
 BROWSE = os.path.join(HERE, 'browse.py')
 DIR = os.path.join(ROOT, '.data', 'browse')
@@ -28,6 +38,7 @@ RATINGS = os.path.join(ROOT, '.data', 'ratings.json')
 PURGED = os.path.join(ROOT, '.data', 'purged.json')
 
 crawl_lock = threading.Lock()
+GEN = 0  # page generation: bumps on every regen; the page polls /status
 
 
 def _load(path):
@@ -73,20 +84,93 @@ def _collection_urls():
 
 def regen():
     """Re-run the crawl for the whole collection -> live.html."""
+    global GEN
     subprocess.run([sys.executable, BROWSE, '--live'], cwd=ROOT,
                    capture_output=True, text=True, timeout=3600)
+    GEN += 1
+
+
+def regen_async():
+    def _run():
+        with crawl_lock:
+            regen()
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def resolver_loop():
+    """In-process Bandcamp URL discovery: drain bc:resolve:queue at one
+    polite search per interval. When the queue empties and we resolved
+    something, re-crawl in the background so the page fills itself in."""
+    r = resolver.get_redis_client()
+    interval = float(os.getenv('RESOLVER_INTERVAL', '20'))
+    pidfile = os.path.join(HERE, 'data', 'resolver.pid')
+    os.makedirs(os.path.dirname(pidfile), exist_ok=True)
+    with open(pidfile, 'w') as f:
+        f.write(str(os.getpid()))  # suggest.py's worker-alive check
+    print(f'[resolver] in-process worker (interval={interval}s)')
+    resolved_since_crawl = 0
+    while True:
+        item = r.lpop(resolver.QUEUE_KEY)
+        if item is None:
+            if resolved_since_crawl and not r.llen(resolver.QUEUE_KEY):
+                resolved_since_crawl = 0
+                regen_async()  # new links landed: page fills itself in
+            time.sleep(2)
+            continue
+        try:
+            job = json.loads(item)
+        except Exception:
+            continue
+        try:
+            if resolver.resolve_job(job):
+                resolved_since_crawl += 1
+        except Exception as e:
+            print(f'[resolver] job failed: {e}', file=sys.stderr)
+        finally:
+            r.srem(resolver.PENDING_KEY,
+                   f"{resolver._norm(job.get('artist', ''))}|"
+                   f"{resolver._norm(job.get('title', ''))}")
+        time.sleep(interval)
 
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
         super().__init__(*a, directory=DIR, **k)
 
+    def handle_one_request(self):
+        # Browsers cancel in-flight requests constantly (reload, iframe
+        # teardown); the resulting BrokenPipe tracebacks are noise.
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
+    def end_headers(self):
+        # live.html is regenerated on every query change; never let a
+        # browser serve a stale page (that's how "9 per page" looked like 8).
+        self.send_header('Cache-Control', 'no-store')
+        super().end_headers()
+
     def do_GET(self):
-        if self.path in ('/', '/index.html'):
+        if self.path == '/status':
+            q = 0
+            try:
+                q = resolver.get_redis_client().llen(resolver.QUEUE_KEY)
+            except Exception:
+                pass
+            self._json({'gen': GEN, 'queue': q})
+        elif self.path in ('/', '/index.html', '/live.html'):
             if not os.path.exists(os.path.join(DIR, 'live.html')):
                 with crawl_lock:
                     regen()
             self.path = '/live.html'
+        elif self.path.endswith('.html'):
+            # pre-paging one-off pages (multiverse.html etc.): the live
+            # page is the product now - send old bookmarks there.
+            self.send_response(302)
+            self.send_header('Location', '/')
+            self.end_headers()
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -126,8 +210,10 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
     os.makedirs(DIR, exist_ok=True)
+    threading.Thread(target=resolver_loop, daemon=True).start()
     srv = ThreadingHTTPServer(('0.0.0.0', port), Handler)
-    print(f'browse_server on :{port} -> {DIR} (GET / = live.html)')
+    print(f'browse_server on :{port} -> {DIR} (GET / = live.html, '
+          f'resolver in-process)')
     srv.serve_forever()
 
 
