@@ -20,6 +20,7 @@ try:
     if local_db.available():
         fetch_release = local_db.fetch_release
         fetch_artist_releases = local_db.fetch_artist_releases
+        fetch_extraartist_releases = local_db.fetch_extraartist_releases
 
         def make_discogs_request(endpoint, max_retries=3):
             import re as _re
@@ -29,6 +30,13 @@ try:
             return _api_make_discogs_request(endpoint, max_retries=max_retries)
 except Exception:
     pass
+
+# Discogs has no API endpoint for extraartist (credit) releases - credit
+# expansion only works against the local dump. API mode skips it.
+try:
+    fetch_extraartist_releases
+except NameError:
+    fetch_extraartist_releases = None
 
 
 def build_release_index(release_ids):
@@ -82,16 +90,21 @@ def extract_release_data(data):
 
 
 def get_contributors(release_data):
-    """Get all valid contributor IDs from a release (filter out null/empty)."""
+    """All valid contributors as (kind, id) pairs.
+
+    kind is 'artist' or 'extra' (credits: mastered by, produced by, artwork,
+    remix...). Discogs keeps the two ID spaces SEPARATE - an extraartist ID
+    queried as an artist ID silently returns a different person.
+    """
     contributors = set()
     for a in release_data.get("artists", []):
         aid = a.get("id", "")
         if aid and aid != "0":  # Filter null/empty IDs
-            contributors.add(aid)
+            contributors.add(("artist", aid))
     for ea in release_data.get("extraartists", []):
         eaid = ea.get("id", "")
         if eaid and eaid != "0":  # Filter null/empty IDs
-            contributors.add(eaid)
+            contributors.add(("extra", eaid))
     return contributors
 
 
@@ -155,13 +168,14 @@ def traverse(source_release_ids, depth=2, max_pages_per_label=5, max_releases_pe
         new_rids = set(new_releases.keys()) - releases.keys()
         depth_results[current_depth] = new_rids
         
-        # Fetch full release data for new releases (label API doesn't include labels/extraartists)
-        if current_depth % 2 == 0:  # Even depths = label expansion
-            print(f"  Fetching full data for {len(new_rids)} new releases...", file=sys.stderr)
-            for rid in list(new_rids):
-                data = fetch_release(rid)
-                if data:
-                    new_releases[rid] = extract_release_data(data)
+        # Fetch full data for every new release: the credits and labels of
+        # contributor-found releases must be known, or the crawl can never
+        # cross into OTHER LABELS through the credits on a release.
+        print(f"  Fetching full data for {len(new_rids)} new releases...", file=sys.stderr)
+        for rid in list(new_rids):
+            data = fetch_release(rid)
+            if data:
+                new_releases[rid] = extract_release_data(data)
         
         releases.update(new_releases)
         
@@ -213,27 +227,37 @@ def traverse(source_release_ids, depth=2, max_pages_per_label=5, max_releases_pe
 def expand_via_contributors(releases, known_contributors, max_releases_per_artist=20):
     """
     Expand releases by finding other releases from known contributors.
+
+    Artists expand via their discography; CREDIT people (mastering,
+    production, artwork, remix) expand via release_extraartists - the
+    cross-label path. Each kind is queried in its own ID space.
     
     For each contributor we've discovered, fetch their releases from Discogs.
     """
     new_releases = {}
     
     # Fetch releases for each known contributor
-    for contrib_id in known_contributors:
-        print(f"  Fetching releases for contributor {contrib_id}...", file=sys.stderr)
-        artist_releases = fetch_artist_releases(contrib_id)
-        if not artist_releases:
+    for kind, contrib_id in known_contributors:
+        if kind == "extra":
+            if fetch_extraartist_releases is None:
+                continue
+            data = fetch_extraartist_releases(contrib_id)
+        else:
+            data = fetch_artist_releases(contrib_id)
+        if not data:
             continue
         
-        for r in safe_get(artist_releases, "releases", [])[:max_releases_per_artist]:
+        for r in safe_get(data, "releases", [])[:max_releases_per_artist]:
             rid = str(r.get("id", ""))
             if rid and rid not in releases and rid not in new_releases:
-                new_releases[rid] = {
-                    "title": r.get("title", "Unknown"),
-                    "artists": [{"id": contrib_id, "name": r.get("artist", "")}],
-                    "labels": [],  # Will be filled when we fetch full data
-                    "extraartists": []
-                }
+                entry = {"title": r.get("title", "Unknown"),
+                         "artists": [], "labels": [], "extraartists": []}
+                who = {"id": contrib_id, "name": r.get("artist", "")}
+                if kind == "extra":
+                    entry["extraartists"].append(dict(who, role=""))
+                else:
+                    entry["artists"].append(who)
+                new_releases[rid] = entry
     
     return new_releases
 

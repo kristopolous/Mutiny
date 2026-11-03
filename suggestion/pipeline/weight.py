@@ -33,22 +33,22 @@ def compute_weights(releases, source_release_ids):
                 features.add(f"artist:{c}")
         for ea in release.get("extraartists", []):
             if ea and ea != "0":
-                features.add(f"artist:{ea}")
+                # Discogs extraartist IDs are a SEPARATE ID space from
+                # artist IDs: artist 123 and extraartist 123 are two
+                # different people. Distinct prefix or they collide.
+                features.add(f"credit:{ea}")
         for l in release.get("labels", []):
             if l and l != "0":
                 features.add(f"label:{l}")
         return features
     
     # Separate helpers for diagnostics
-    def get_contributors(release):
-        contribs = set()
-        for c in release.get("contributors", []):
-            if c and c != "0":
-                contribs.add(c)
-        for ea in release.get("extraartists", []):
-            if ea and ea != "0":
-                contribs.add(ea)
-        return contribs
+    def get_artists(release):
+        return {c for c in release.get("contributors", []) if c and c != "0"}
+
+    def get_credits(release):
+        return {ea for ea in release.get("extraartists", [])
+                if ea and ea != "0"}
     
     def get_labels(release):
         return {l for l in release.get("labels", []) if l and l != "0"}
@@ -58,14 +58,18 @@ def compute_weights(releases, source_release_ids):
     source_releases = [r for r in releases if r.get("release_id") in source_ids_set]
     
     source_features = set()
-    source_contributors = set()
+    source_artists = set()
+    source_credits = set()
     source_labels = set()
     for r in source_releases:
         source_features.update(get_features(r))
-        source_contributors.update(get_contributors(r))
+        source_artists.update(get_artists(r))
+        source_credits.update(get_credits(r))
         source_labels.update(get_labels(r))
     
-    print(f"  Source has {len(source_features)} features ({len(source_contributors)} contributors, {len(source_labels)} labels)", file=sys.stderr)
+    print(f"  Source has {len(source_features)} features "
+          f"({len(source_artists)} artists, {len(source_credits)} credits, "
+          f"{len(source_labels)} labels)", file=sys.stderr)
     
     # Build cardinality map for all features
     print("Computing cardinality...", file=sys.stderr)
@@ -89,15 +93,22 @@ def compute_weights(releases, source_release_ids):
             continue
         
         release_features = get_features(release)
-        release_contributors = get_contributors(release)
+        release_artists = get_artists(release)
+        release_credits = get_credits(release)
         release_labels = get_labels(release)
-        
+
         shared_features = source_features & release_features
-        shared_contributors = source_contributors & release_contributors
+        shared_artists = source_artists & release_artists
+        shared_credits = source_credits & release_credits
         shared_labels = source_labels & release_labels
-        
-        # Compute IDF weights for each category
-        contrib_weight = sum(feature_idf.get(f"artist:{c}", 0) for c in shared_contributors)
+
+        # Compute IDF weights for each category. Credits (extraartists)
+        # score through their own namespace - this is the cross-label
+        # signal: a shared mastering engineer or producer who appears
+        # on few releases is strong affinity wherever they appear.
+        contrib_weight = (
+            sum(feature_idf.get(f"artist:{c}", 0) for c in shared_artists)
+            + sum(feature_idf.get(f"credit:{e}", 0) for e in shared_credits))
         label_weight = sum(feature_idf.get(f"label:{l}", 0) for l in shared_labels)
         
         # Final weight is the combined score
@@ -110,7 +121,7 @@ def compute_weights(releases, source_release_ids):
                 # Diagnostic fields - useful for debugging
                 "contrib_weight": round(contrib_weight, 4),
                 "label_weight": round(label_weight, 4),
-                "shared_contributors": list(shared_contributors),
+                "shared_contributors": list(shared_artists | shared_credits),
                 "shared_labels": list(shared_labels),
                 "shared_count": len(shared_features),
             })

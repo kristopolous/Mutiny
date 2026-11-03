@@ -142,6 +142,37 @@ def fetch_artist_releases(artist_id, limit=200):
     }
 
 
+def fetch_extraartist_releases(extraartist_id, limit=200):
+    """
+    Releases where this person appears in the CREDITS (extraartists):
+    mastered by, produced by, artwork, remix, writing, etc.
+
+    Discogs keeps extraartist IDs in a SEPARATE ID space from artist IDs -
+    this must never be queried through release_artists. This is the path
+    that crosses labels: a mastering engineer or producer on your seed
+    appears on releases all over the map, on labels the seed's own
+    roster would never touch.
+    """
+    c = _connect()
+    eid = int(extraartist_id)
+    rows = c.execute(
+        """
+        SELECT rea.release_id AS id, r.title AS title, e.name AS artist
+        FROM release_extraartists rea
+        JOIN releases r ON r.id=rea.release_id
+        JOIN extraartists e ON e.id=rea.extraartist_id
+        WHERE rea.extraartist_id=?
+        ORDER BY r.released DESC, r.id DESC
+        LIMIT ?
+        """, (eid, limit)).fetchall()
+    return {
+        "releases": [
+            {"id": r["id"], "title": r["title"], "artist": r["artist"]}
+            for r in rows
+        ]
+    }
+
+
 def fetch_label_releases(label_id, page=1, per_page=25):
     """
     Mirror of `labels/{id}/releases?page={page}`:
