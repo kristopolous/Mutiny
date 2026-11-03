@@ -98,6 +98,63 @@ def _warn_no_local_db():
               file=sys.stderr)
 
 
+def _load_ratings():
+    """User weights (.data/ratings.json): normalized BC URL -> '3'|'4'|'5'.
+    These are taste parameters, not popularity - they only ever scale a
+    seed's own vote in rank fusion."""
+    import json
+    path = os.path.join(os.path.dirname(HERE), '.data', 'ratings.json')
+    try:
+        with open(path) as fh:
+            return {u: v for u, v in json.load(fh).items() if v in ('3', '4', '5')}
+    except (OSError, ValueError):
+        return {}
+
+
+def _load_purged():
+    """Releases the user listened to and rejected (.data/purged.json).
+
+    Purged is influential: a purged release is excluded from every future
+    suggestion run - by Bandcamp URL, and by its Discogs release ID via the
+    correlation cache (so it cannot re-enter through a different URL).
+    It is a release-level veto, not a neighborhood poison: hating one
+    Oráculo record says nothing about the rest of the label.
+    """
+    import json
+    path = os.path.join(os.path.dirname(HERE), '.data', 'purged.json')
+    try:
+        with open(path) as fh:
+            return {u for u, v in json.load(fh).items() if v}
+    except (OSError, ValueError):
+        return set()
+
+
+def _norm_bc(url):
+    from urllib.parse import urlsplit, urlunsplit
+    p = urlsplit(url or '')
+    return urlunsplit((p.scheme, p.netloc, p.path, '', '')).rstrip('/')
+
+
+def _purge_exclusions(purged_urls, verbose=False):
+    """Discogs release IDs behind purged Bandcamp URLs (via bc2dg)."""
+    ids = set()
+    if not purged_urls:
+        return ids
+    import re as _re
+    import redis as _redis
+    from bc import _slug_from_bc_url
+    r = _redis.Redis(decode_responses=True)
+    for u in purged_urls:
+        stub = _slug_from_bc_url(u)
+        dg = r.hget('bc2dg', stub) if stub else None
+        m = _re.search(r'/release/(\d+)', dg or '')
+        if m:
+            ids.add(m.group(1))
+    if verbose and ids:
+        print(f"[purge] discogs ids blocked: {sorted(ids)}", file=sys.stderr)
+    return ids
+
+
 def main():
     import argparse
     p = argparse.ArgumentParser(
@@ -119,6 +176,10 @@ def main():
     p.add_argument('--no-search', action='store_true',
                    help='Only use the correlation cache; never queue Bandcamp searches')
     args = p.parse_args()
+
+    purged_urls = _load_purged()
+    purged_norm = {_norm_bc(u) for u in purged_urls}
+    purged_rids = _purge_exclusions(purged_urls, verbose=args.verbose)
 
     from traverse_and_weight import (collect_source_ids, traverse, compute_idf_weights,
                                      dedupe_releases, fuse_reciprocal_rank)
@@ -147,12 +208,18 @@ def main():
               "recommendations (no graph traversal)", file=sys.stderr)
         from bc_rec import recommend
         items, seen = [], set()
+        n_purged = 0
         for u in bc_urls:
             for it in recommend(u, verbose=args.verbose):
                 if it['url'] not in seen:
                     seen.add(it['url'])
                     it['source'] = u
+                    if _norm_bc(it['url']) in purged_norm:
+                        n_purged += 1  # user vetoed this one: never again
+                        continue
                     items.append(it)
+        if n_purged and args.verbose:
+            print(f"[purge] excluded {n_purged} purged suggestion(s)", file=sys.stderr)
         if args.top_n > 0:
             items = items[:args.top_n]
         if not items:
@@ -195,9 +262,27 @@ def main():
         # Deduplicate by (artist, title); drop groups that are the seed albums
         weighted = dedupe_releases(weighted, source_ids)
     else:
-        # Multi-seed: weight each seed independently (its own traversal +
-        # IDF), then merge with reciprocal rank fusion. A dense neighborhood
-        # cannot out-shout a sparse one; only cross-seed consensus compounds.
+        # Multi-seed: the collection is the query. Each seed gets its own
+        # traversal + IDF (its own ranking); then lists merge with weighted
+        # rank fusion. Seed weights come from the user's ratings (3/4/5,
+        # unrated = 1); purged collection members are NEGATIVE parameters:
+        # their vote subtracts. A dense neighborhood still cannot out-shout
+        # a sparse one - only cross-seed consensus compounds.
+        ratings_map = {}
+        for u, v in _load_ratings().items():
+            ratings_map[_norm_bc(u)] = float(v)
+        weights, negative = {}, set()
+        for sid in source_ids:
+            n = _norm_bc(bandcamp_map.get(sid) or '')
+            if not n:
+                continue
+            if n in purged_norm:
+                negative.add(sid)
+            elif n in ratings_map:
+                weights[sid] = ratings_map[n]
+        if args.verbose and (weights or negative):
+            print(f"[query] seed weights: {weights} negative: {sorted(negative)}",
+                  file=sys.stderr)
         per_seed = {}
         for sid in source_ids:
             if args.verbose:
@@ -211,10 +296,17 @@ def main():
             w = compute_idf_weights(rel, [sid])
             # dedupe against ALL seeds: another seed's album is never a suggestion
             per_seed[sid] = dedupe_releases(w, source_ids)
-        weighted = fuse_reciprocal_rank(per_seed)
+        weighted = fuse_reciprocal_rank(per_seed, weights=weights,
+                                        negative=negative)
 
     # Weighted list is already sorted by final_weight desc.
     results = weighted
+    if purged_rids:
+        kept = [r for r in results if str(r['release_id']) not in purged_rids]
+        if args.verbose and len(kept) != len(results):
+            print(f"[purge] excluded {len(results) - len(kept)} purged release(s)",
+                  file=sys.stderr)
+        results = kept
 
     # Resolve Bandcamp links: cache hits are instant; misses are queued to the
     # resolver worker (Bandcamp search at a fixed polite rate) and we wait up
@@ -282,6 +374,8 @@ def main():
     for r in candidates:
         rid = r['release_id']
         if rid in bc_by_rid:
+            if _norm_bc(bc_by_rid[rid]) in purged_norm:
+                continue  # resolved to a URL the user vetoed
             final.append(r)
             if args.top_n > 0 and len(final) >= args.top_n:
                 break
