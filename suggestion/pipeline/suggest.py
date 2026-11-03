@@ -120,7 +120,8 @@ def main():
                    help='Only use the correlation cache; never queue Bandcamp searches')
     args = p.parse_args()
 
-    from traverse_and_weight import collect_source_ids, traverse, compute_idf_weights, dedupe_releases
+    from traverse_and_weight import (collect_source_ids, traverse, compute_idf_weights,
+                                     dedupe_releases, fuse_reciprocal_rank)
 
     _warn_no_local_db()
 
@@ -183,16 +184,34 @@ def main():
     if args.verbose:
         print(f"Seeds: {source_ids}", file=sys.stderr)
 
-    releases = traverse(
-        source_ids,
-        depth=args.depth,
-        max_pages_per_label=args.max_pages_per_label,
-        max_releases_per_artist=args.max_releases_per_artist,
-    )
-    weighted = compute_idf_weights(releases, source_ids)
-
-    # Deduplicate by (artist, title); drop groups that are the seed albums
-    weighted = dedupe_releases(weighted, source_ids)
+    if len(source_ids) == 1:
+        releases = traverse(
+            source_ids,
+            depth=args.depth,
+            max_pages_per_label=args.max_pages_per_label,
+            max_releases_per_artist=args.max_releases_per_artist,
+        )
+        weighted = compute_idf_weights(releases, source_ids)
+        # Deduplicate by (artist, title); drop groups that are the seed albums
+        weighted = dedupe_releases(weighted, source_ids)
+    else:
+        # Multi-seed: weight each seed independently (its own traversal +
+        # IDF), then merge with reciprocal rank fusion. A dense neighborhood
+        # cannot out-shout a sparse one; only cross-seed consensus compounds.
+        per_seed = {}
+        for sid in source_ids:
+            if args.verbose:
+                print(f"[multi] traversing seed {sid} ...", file=sys.stderr)
+            rel = traverse(
+                [sid],
+                depth=args.depth,
+                max_pages_per_label=args.max_pages_per_label,
+                max_releases_per_artist=args.max_releases_per_artist,
+            )
+            w = compute_idf_weights(rel, [sid])
+            # dedupe against ALL seeds: another seed's album is never a suggestion
+            per_seed[sid] = dedupe_releases(w, source_ids)
+        weighted = fuse_reciprocal_rank(per_seed)
 
     # Weighted list is already sorted by final_weight desc.
     results = weighted
@@ -291,6 +310,7 @@ def main():
         print(json.dumps({
             'source_ids': source_ids,
             'bandcamp_sources': bandcamp_map,
+            'mode': 'discogs-graph-rrf' if len(source_ids) > 1 else 'discogs-graph',
             'releases': final,
         }, indent=2))
         return
@@ -309,6 +329,8 @@ def main():
             print(f"     label: {', '.join(dict.fromkeys(meta['labels']))}")
         if bc:
             print(f"     bandcamp: {bc}")
+        if r.get('seeds'):
+            print(f"     from seeds: {', '.join(map(str, r['seeds']))}")
         print(f"     discogs : {discogs}")
         print(f"     score={r.get('final_weight', 0):.3f}  depth={r.get('depth', '?')}")
         print()

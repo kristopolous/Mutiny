@@ -126,6 +126,32 @@ def dedupe_releases(weighted, source_ids):
     return [groups[k] for k in groups if not group_is_seed[k]]
 
 
+def fuse_reciprocal_rank(per_seed_ranked, k=10):
+    """Merge per-seed ranked lists with reciprocal rank fusion (RRF).
+
+    score(r) = sum over seeds of 1/(k + rank_in_that_seed_list).
+    Scale-free: each seed votes with its own ranking, so a dense neighborhood
+    cannot out-shout a sparse one (no absolute score comparison, no
+    popularity - consensus across seeds is the only thing that compounds).
+    Each result gains 'rrf' and 'seeds' (which seed lists contained it).
+    """
+    fused = {}
+    for sid, ranked in per_seed_ranked.items():
+        for rank, r in enumerate(ranked, 1):
+            rid = r.get('release_id')
+            if rid is None:
+                continue
+            if rid not in fused:
+                fused[rid] = {**r, 'rrf': 0.0, 'seeds': []}
+            fused[rid]['rrf'] += 1.0 / (k + rank)
+            if sid not in fused[rid]['seeds']:
+                fused[rid]['seeds'].append(sid)
+    out = sorted(fused.values(), key=lambda x: (-x['rrf'], str(x['release_id'])))
+    for r in out:
+        r['final_weight'] = round(r['rrf'], 6)
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser(description='Traverse and weight releases')
     parser.add_argument('urls', nargs='*', help='Bandcamp or Discogs release URLs')

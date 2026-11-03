@@ -45,11 +45,11 @@ def get_info(url, cache):
     Cached to .data/bc-art-ids.json.
     """
     key = _norm_url(url)
-    if key in cache and isinstance(cache[key], dict):
+    if key in cache and isinstance(cache[key], dict) and 'tracks' in cache[key]:
         return cache[key]
     from bc import _fetch_page
     html = _fetch_page(url)
-    info = {'id': None, 'art': None}
+    info = {'id': None, 'art': None, 'tracks': None}
     if html:
         m = re.search(r'EmbeddedPlayer/[^"\'>\s]*?album=(\d+)', html)   # their own embed
         if not m:
@@ -63,6 +63,14 @@ def get_info(url, cache):
         im = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', html)
         if im:
             info['art'] = re.sub(r'_\d+\.(jpg|png)$', r'_10.\1', im.group(1))
+        tm = re.search(r'data-tralbum="([^"]*)"', html)
+        if tm:
+            try:
+                import html as _html
+                tdata = json.loads(_html.unescape(tm.group(1)))
+                info['tracks'] = len(tdata.get('trackinfo') or [])
+            except ValueError:
+                pass
         time.sleep(1.0)  # be polite; plain subdomain album pages (no challenge)
     cache[key] = info
     return info
@@ -76,10 +84,11 @@ def player_src(pid):
             '/tracklist=true/transparent=true/')
 
 
-def player_iframe(pid):
+def player_iframe(pid, tracks=None):
     if not pid:
         return '<div class="noplayer">player unavailable</div>'
-    return (f'<iframe class="player" src="{player_src(pid)}" frameborder="0" '
+    return (f'<iframe class="player" data-tracks="{tracks if tracks else 6}" '
+            f'src="{player_src(pid)}" frameborder="0" '
             f'allowfullscreen '
             f'allow="autoplay; encrypted-media; fullscreen; picture-in-picture">'
             f'</iframe>')
@@ -122,7 +131,7 @@ def seed_block(title, artists, year, labels, cover, url):
         rows.append(f'<span class="y">{escape(str(year))}</span>')
     if labels:
         rows.append(f'<span class="l">{escape(", ".join(dict.fromkeys(labels)))}</span>')
-    player = player_iframe(cover.get('id'))
+    player = player_iframe(cover.get('id'), cover.get('tracks'))
     return f'''
   <section class="seed">
     <h1>SEED</h1>
@@ -148,7 +157,7 @@ def result_card(i, rel, cover):
         link = f'<a class="open" href="{escape(url)}" target="_blank">open on bandcamp &nearr;</a>'
     else:
         link = '<span class="discogs-only">discogs only (no bandcamp)</span>'
-    player = player_iframe(cover.get('id'))
+    player = player_iframe(cover.get('id'), cover.get('tracks'))
     return f'''
     <div class="card">
       <div class="meta"><span class="num">{i}</span>{''.join(meta)}</div>
@@ -282,7 +291,20 @@ def build_html(seed, data, cards, elapsed, n_total, n_with, releases):
   </section>
   <div class="footer">generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
    &middot; music-explorer suggestion pipeline &middot; structural similarity, zero popularity signal</div>
-</div></body></html>'''
+</div>
+<script>
+// Bandcamp large embed = square artwork (width x width) + ~170px chrome
+// + 33px per track row (32px line-height + border). Size each iframe to fit
+// its own tracklist so nothing clips and there is no dead space.
+function fitPlayer(f) {{
+  var n = parseInt(f.dataset.tracks, 10) || 6;
+  f.style.height = Math.round(f.clientWidth + 170 + 33 * n) + 'px';
+}}
+var players = document.querySelectorAll('iframe.player');
+players.forEach(fitPlayer);
+window.addEventListener('resize', function () {{ players.forEach(fitPlayer); }});
+</script>
+</body></html>'''
 
 
 # ---------------------------------------------------------------- main

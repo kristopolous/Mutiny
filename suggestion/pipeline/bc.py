@@ -345,7 +345,10 @@ def _fetch_page(url):
     """Fetch a Bandcamp page straight from the web (not the Discogs API)."""
     import requests
     headers = {
-        'User-Agent': os.getenv('DISCOGS_USER_AGENT', 'MusicRecommender/1.0')
+        # some Bandcamp pages 404 non-browser UAs (e.g. detund/soap)
+        'User-Agent': os.getenv('BC_PAGE_USER_AGENT',
+                                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                                '(KHTML, like Gecko) Chrome/126.0 Safari/537.36')
     }
     try:
         resp = requests.get(url, headers=headers, timeout=20)
