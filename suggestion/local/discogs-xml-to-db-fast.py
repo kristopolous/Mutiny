@@ -520,7 +520,15 @@ def parse_xml_file(xml_path, db_path, batch_size):
     imp = Importer(conn, batch_size)
     t0 = time.time()
 
-    context = etree.iterparse(xml_path, events=('end',), tag=b'release',
+    # lxml's iterparse doesn't transparently read .gz, so stream it via gzip
+    # (avoids writing a ~60GB decompressed temp file).
+    if str(xml_path).endswith('.gz'):
+        import gzip as _gzip
+        source = _gzip.open(str(xml_path), 'rb')
+    else:
+        source = str(xml_path)
+
+    context = etree.iterparse(source, events=('end',), tag=b'release',
                               huge_tree=False)
     for _event, elem in context:
         imp.parse_release(elem)
@@ -537,6 +545,8 @@ def parse_xml_file(xml_path, db_path, batch_size):
                 imp.progress()
 
     imp.flush()
+    if hasattr(source, 'close'):
+        source.close()
     conn.execute('ANALYZE')
     conn.commit()
 

@@ -89,6 +89,15 @@ def _resolver_running():
         return False
 
 
+def _warn_no_local_db():
+    import local_db
+    if not local_db.available():
+        print("[warn] local Discogs DB not found "
+              f"({local_db.db_path()}) - falling back to the rate-limited "
+              "Discogs API: expect slow runs and 429s.",
+              file=sys.stderr)
+
+
 def main():
     import argparse
     p = argparse.ArgumentParser(
@@ -112,6 +121,8 @@ def main():
     args = p.parse_args()
 
     from traverse_and_weight import collect_source_ids, traverse, compute_idf_weights, dedupe_releases
+
+    _warn_no_local_db()
 
     urls = []
     if args.file:
