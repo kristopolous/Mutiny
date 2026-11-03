@@ -468,8 +468,17 @@ def labels_section(title, ordered, n_distinct, n_total):
   </section>'''
 
 
+def _queue_depth():
+    """How many releases are waiting on a polite Bandcamp lookup (1/20s)."""
+    try:
+        import redis
+        return int(redis.Redis().llen('bc:resolve:queue'))
+    except Exception:
+        return None
+
+
 def build_html(data, cards_html, collection_html, ratings, purged,
-               elapsed, n_total, n_with, releases, page_size=8):
+               elapsed, n_total, n_with, releases, page_size=8, queued=None):
     mode = data.get('mode', 'discogs-graph')
     mode_label = {'bandcamp-native': 'bandcamp-native (seed not in Discogs)',
                   'discogs-graph-rrf': 'discogs graph, rank-fused multi-seed'
@@ -479,6 +488,8 @@ def build_html(data, cards_html, collection_html, ratings, purged,
     js = (JS.replace('%RATINGS%', json.dumps(ratings))
             .replace('%PURGED%', json.dumps(purged))
             .replace('%PAGE%', str(max(1, page_size))))
+    queued_note = (f' &middot; {queued} queued for bandcamp'
+                   if queued else '')
     return f'''<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -487,7 +498,7 @@ def build_html(data, cards_html, collection_html, ratings, purged,
 <body><div class="wrap">
   <div class="toolbar">
     <span>{escape(mode_label)} &middot; {n_with}/{n_total} with player
-      &middot; {elapsed:.0f}s</span>
+      &middot; {elapsed:.0f}s{queued_note}</span>
     <span id="status"></span>
     <label><input type="checkbox" id="hiderated"> hide marked</label>
     <button id="exportbtn">export ratings</button>
@@ -620,7 +631,7 @@ def main():
                       collection_section(collection, ratings_n, purged_n),
                       ratings, purged,
                       time.time() - t0, len(releases), n_with, releases,
-                      args.page_size)
+                      args.page_size, _queue_depth())
     if args.live:
         slug = 'live'
     else:
